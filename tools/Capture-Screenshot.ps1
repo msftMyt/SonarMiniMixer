@@ -1,7 +1,8 @@
 $ErrorActionPreference = 'Stop'
 $exe = "$env:LOCALAPPDATA\Programs\SonarMiniMixer\SonarMiniMixer.exe"
 $cli = "$env:LOCALAPPDATA\Programs\SonarMiniMixer\SonarMiniMixer.Cli.exe"
-$out = 'E:\code\tools\SonarMiniMixer\artifacts\SonarMiniMixer-screenshot.png'
+$project = Split-Path -Parent $PSScriptRoot
+$out = Join-Path $project 'artifacts\SonarMiniMixer-screenshot.png'
 Get-Process SonarMiniMixer -ErrorAction SilentlyContinue | Stop-Process -Force
 $p = Start-Process $exe -PassThru
 Start-Sleep -Seconds 3
