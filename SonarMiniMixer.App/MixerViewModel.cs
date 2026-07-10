@@ -31,7 +31,12 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         get => _chatMix;
         set
         {
-            if (_isApplyingState || !CanControlChatMix || !Set(ref _chatMix, value)) return;
+            if (_isApplyingState)
+            {
+                Set(ref _chatMix, value);
+                return;
+            }
+            if (!CanControlChatMix || !Set(ref _chatMix, value)) return;
             _chatMixDebounce?.Cancel();
             _chatMixDebounce?.Dispose();
             _chatMixDebounce = new CancellationTokenSource();
