@@ -7,8 +7,29 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="NAudio.Core" Version="2.2.1" />
-    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" GeneratePathProperty="true" ExcludeAssets="compile" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" GeneratePathProperty="true" ExcludeAssets="compile" />
   </ItemGroup>
+
+  <Target Name="PatchThirdPartyCodeViewPaths" BeforeTargets="ResolveAssemblyReferences">
+    <PropertyGroup>
+      <_NAudioCorePatched>$(IntermediateOutputPath)sanitized\NAudio.Core.dll</_NAudioCorePatched>
+      <_NAudioWasapiPatched>$(IntermediateOutputPath)sanitized\NAudio.Wasapi.dll</_NAudioWasapiPatched>
+    </PropertyGroup>
+    <MakeDir Directories="$(IntermediateOutputPath)sanitized" />
+    <Copy SourceFiles="$(PkgNAudio_Core)\lib\netstandard2.0\NAudio.Core.dll" DestinationFiles="$(_NAudioCorePatched)" />
+    <Copy SourceFiles="$(PkgNAudio_Wasapi)\lib\netstandard2.0\NAudio.Wasapi.dll" DestinationFiles="$(_NAudioWasapiPatched)" />
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;$files=@('$(_NAudioCorePatched)','$(_NAudioWasapiPatched)'); foreach($file in $files){ $bytes=[IO.File]::ReadAllBytes($file); $text=[Text.Encoding]::ASCII.GetString($bytes); $matches=[regex]::Matches($text,'C:\\Users\\[^\x00]+?\.pdb'); foreach($match in $matches){ $replacement=('third-party\\NAudio.pdb').PadRight($match.Length,[char]0); [Text.Encoding]::ASCII.GetBytes($replacement).CopyTo($bytes,$match.Index) }; [IO.File]::WriteAllBytes($file,$bytes) }&quot;" />
+    <ItemGroup>
+      <Reference Include="$(_NAudioCorePatched)" Private="true" />
+      <Reference Include="$(_NAudioWasapiPatched)" Private="true" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="SanitizeThirdPartySymbols" BeforeTargets="GenerateBundle">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)" Condition="'%(ResolvedFileToPublish.Extension)' == '.pdb' and $([System.String]::Copy('%(ResolvedFileToPublish.NuGetPackageId)').StartsWith('NAudio'))" />
+    </ItemGroup>
+  </Target>
 
 </Project>
