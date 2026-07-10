@@ -19,8 +19,14 @@
     <StartupObject>SonarMiniMixer.App.App</StartupObject>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <AssemblyName>SonarMiniMixer</AssemblyName>
     <RootNamespace>SonarMiniMixer.App</RootNamespace>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\AppIcon.ico" />
+    <Resource Include="Assets\AppIcon.png" />
+  </ItemGroup>
 
 </Project>

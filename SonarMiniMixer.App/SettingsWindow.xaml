@@ -1,7 +1,7 @@
 <Window x:Class="SonarMiniMixer.App.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Sonar Mini Mixer Settings" Width="390" Height="235" ResizeMode="NoResize"
+        Title="Sonar Mini Mixer Settings" Icon="Assets/AppIcon.ico" Width="390" Height="235" ResizeMode="NoResize"
         WindowStartupLocation="CenterOwner" Background="#16141F" Foreground="#F4F1FA" ShowInTaskbar="False">
   <Grid Margin="24">
     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>

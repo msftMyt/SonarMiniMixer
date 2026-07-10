@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">Sonar Mini Mixer icon</title>
+  <desc id="description">An original dark signal-path S with mixer accents on a rounded purple tile.</desc>
+  <defs>
+    <linearGradient id="tile" x1="40" y1="24" x2="224" y2="236" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#D8B4FF"/>
+      <stop offset="0.52" stop-color="#B17BEF"/>
+      <stop offset="1" stop-color="#8050D5"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="8" y="8" width="240" height="240" rx="57" fill="url(#tile)"/>
+  <rect x="10" y="10" width="236" height="236" rx="55" fill="none" stroke="#F3E8FF" stroke-opacity="0.32" stroke-width="4"/>
+  <path d="M174 71H105C83 71 70 82 70 98C70 113 82 123 104 123H153C174 123 186 136 186 153C186 173 171 185 149 185H80"
+        fill="none" stroke="#1B1525" stroke-width="29" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <g fill="#F2E8FF">
+    <rect x="139" y="61" width="11" height="20" rx="5.5"/>
+    <rect x="101" y="113" width="11" height="20" rx="5.5"/>
+    <rect x="119" y="175" width="11" height="20" rx="5.5"/>
+  </g>
+</svg>

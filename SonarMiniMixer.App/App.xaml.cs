@@ -68,7 +68,7 @@ public partial class App : System.Windows.Application
         _trayIcon = new Forms.NotifyIcon
         {
             Text = "Sonar Mini Mixer",
-            Icon = CreateIcon(),
+            Icon = LoadTrayIcon(),
             Visible = true,
             ContextMenuStrip = new Forms.ContextMenuStrip()
         };
@@ -129,25 +129,13 @@ public partial class App : System.Windows.Application
         base.OnExit(e);
     }
 
-    private static Icon CreateIcon()
+    private static Icon LoadTrayIcon()
     {
-        using var bitmap = new Bitmap(32, 32);
-        using var graphics = Graphics.FromImage(bitmap);
-        graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-        graphics.Clear(Color.Transparent);
-        using var background = new SolidBrush(Color.FromArgb(189, 147, 249));
-        using var foreground = new Pen(Color.FromArgb(23, 19, 31), 3.2f)
-        {
-            StartCap = System.Drawing.Drawing2D.LineCap.Round,
-            EndCap = System.Drawing.Drawing2D.LineCap.Round
-        };
-        graphics.FillRoundedRectangle(background, new RectangleF(1, 1, 30, 30), 8);
-        graphics.DrawLine(foreground, 9, 10, 23, 10);
-        graphics.DrawLine(foreground, 9, 16, 20, 16);
-        graphics.DrawLine(foreground, 9, 22, 17, 22);
-        var handle = bitmap.GetHicon();
-        try { return (Icon)Icon.FromHandle(handle).Clone(); }
-        finally { NativeMethods.DestroyIcon(handle); }
+        var uri = new Uri("pack://application:,,,/Assets/AppIcon.ico", UriKind.Absolute);
+        using var stream = System.Windows.Application.GetResourceStream(uri)?.Stream
+            ?? throw new InvalidOperationException("The embedded application icon could not be loaded.");
+        using var icon = new Icon(stream, Forms.SystemInformation.SmallIconSize);
+        return (Icon)icon.Clone();
     }
 
     private static void EnsureConsole()
@@ -163,21 +151,5 @@ public partial class App : System.Windows.Application
     {
         [System.Runtime.InteropServices.DllImport("kernel32.dll")] internal static extern bool AttachConsole(int processId);
         [System.Runtime.InteropServices.DllImport("kernel32.dll")] internal static extern bool AllocConsole();
-        [System.Runtime.InteropServices.DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr handle);
-    }
-}
-
-internal static class GraphicsExtensions
-{
-    public static void FillRoundedRectangle(this Graphics graphics, Brush brush, RectangleF bounds, float radius)
-    {
-        using var path = new System.Drawing.Drawing2D.GraphicsPath();
-        var diameter = radius * 2;
-        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
-        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-        path.CloseFigure();
-        graphics.FillPath(brush, path);
     }
 }
