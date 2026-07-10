@@ -57,6 +57,6 @@ public sealed class SteelSeriesEndpointProvider : ISonarEndpointProvider, IDispo
         finally { _gate.Release(); }
     }
 
-    public void Invalidate() => _cached = null;
+    public void Invalidate() => Volatile.Write(ref _cached, null);
     public void Dispose() { _http.Dispose(); _gate.Dispose(); }
 }

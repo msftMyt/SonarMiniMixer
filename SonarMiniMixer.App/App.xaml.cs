@@ -1,7 +1,6 @@
 ﻿using System.Drawing;
 using System.IO;
 using System.IO.Pipes;
-using System.Reflection;
 using System.Text;
 using System.Windows;
 using SonarMiniMixer.Core;
@@ -35,20 +34,33 @@ public partial class App : System.Windows.Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
-        _mutex = new Mutex(true, MutexName, out var created);
-        if (!created)
+        try
         {
-            _ = CommandLine.RunAsync(["show"]);
-            Shutdown();
-            return;
-        }
+            _mutex = new Mutex(true, MutexName, out var created);
+            if (!created)
+            {
+                _ = CommandLine.RunAsync(["show"]);
+                Shutdown();
+                return;
+            }
 
-        var endpoints = new SteelSeriesEndpointProvider();
-        var client = new SonarClient(endpoints);
-        _window = new MainWindow(new MixerViewModel(client), new SettingsStore());
-        CreateTrayIcon();
-        StartIpcServer();
-        if (!e.Args.Contains("--background")) _window.ShowFromTray();
+            var endpoints = new SteelSeriesEndpointProvider();
+            var client = new SonarClient(endpoints);
+            _window = new MainWindow(new MixerViewModel(client), new SettingsStore());
+            MainWindow = _window;
+            StartupRegistration.RepairIfEnabled();
+            CreateTrayIcon();
+            StartIpcServer();
+            if (!e.Args.Contains("--background")) _window.ShowFromTray();
+        }
+        catch (Exception exception)
+        {
+            var logDirectory = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SonarMiniMixer");
+            Directory.CreateDirectory(logDirectory);
+            File.WriteAllText(Path.Combine(logDirectory, "startup-error.log"), exception.ToString());
+            System.Windows.MessageBox.Show("Sonar Mini Mixer could not start. See startup-error.log under Local AppData.", "Sonar Mini Mixer startup error");
+            Shutdown(1);
+        }
     }
 
     private void CreateTrayIcon()
@@ -64,7 +76,10 @@ public partial class App : System.Windows.Application
         _trayIcon.ContextMenuStrip.Items.Add("Settings", null, (_, _) => Dispatcher.Invoke(() => new SettingsWindow { Owner = _window }.ShowDialog()));
         _trayIcon.ContextMenuStrip.Items.Add(new Forms.ToolStripSeparator());
         _trayIcon.ContextMenuStrip.Items.Add("Exit", null, (_, _) => Dispatcher.Invoke(ExitApp));
-        _trayIcon.MouseClick += (_, args) => { if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(() => _window?.ShowFromTray()); };
+        _trayIcon.MouseClick += (_, args) =>
+        {
+            if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(() => _window?.ToggleFromTray());
+        };
     }
 
     private void StartIpcServer()
@@ -76,12 +91,21 @@ public partial class App : System.Windows.Application
             {
                 try
                 {
-                    await using var pipe = new NamedPipeServerStream(PipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+                    await using var pipe = new NamedPipeServerStream(
+                        PipeName,
+                        PipeDirection.In,
+                        1,
+                        PipeTransmissionMode.Byte,
+                        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
                     await pipe.WaitForConnectionAsync(_ipcCancellation.Token);
                     var buffer = new byte[32];
                     var count = await pipe.ReadAsync(buffer, _ipcCancellation.Token);
                     var command = Encoding.UTF8.GetString(buffer, 0, count);
-                    await Dispatcher.InvokeAsync(() => { if (command == "show") _window?.ShowFromTray(); else if (command == "exit") ExitApp(); });
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        if (command == "show") _window?.ShowFromTray();
+                        else if (command == "exit") ExitApp();
+                    });
                 }
                 catch (OperationCanceledException) { break; }
                 catch { await Task.Delay(250); }
@@ -112,12 +136,18 @@ public partial class App : System.Windows.Application
         graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
         graphics.Clear(Color.Transparent);
         using var background = new SolidBrush(Color.FromArgb(189, 147, 249));
-        using var foreground = new Pen(Color.FromArgb(23, 19, 31), 3.2f) { StartCap = System.Drawing.Drawing2D.LineCap.Round, EndCap = System.Drawing.Drawing2D.LineCap.Round };
+        using var foreground = new Pen(Color.FromArgb(23, 19, 31), 3.2f)
+        {
+            StartCap = System.Drawing.Drawing2D.LineCap.Round,
+            EndCap = System.Drawing.Drawing2D.LineCap.Round
+        };
         graphics.FillRoundedRectangle(background, new RectangleF(1, 1, 30, 30), 8);
         graphics.DrawLine(foreground, 9, 10, 23, 10);
         graphics.DrawLine(foreground, 9, 16, 20, 16);
         graphics.DrawLine(foreground, 9, 22, 17, 22);
-        return Icon.FromHandle(bitmap.GetHicon());
+        var handle = bitmap.GetHicon();
+        try { return (Icon)Icon.FromHandle(handle).Clone(); }
+        finally { NativeMethods.DestroyIcon(handle); }
     }
 
     private static void EnsureConsole()
@@ -133,6 +163,7 @@ public partial class App : System.Windows.Application
     {
         [System.Runtime.InteropServices.DllImport("kernel32.dll")] internal static extern bool AttachConsole(int processId);
         [System.Runtime.InteropServices.DllImport("kernel32.dll")] internal static extern bool AllocConsole();
+        [System.Runtime.InteropServices.DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr handle);
     }
 }
 
@@ -141,11 +172,11 @@ internal static class GraphicsExtensions
     public static void FillRoundedRectangle(this Graphics graphics, Brush brush, RectangleF bounds, float radius)
     {
         using var path = new System.Drawing.Drawing2D.GraphicsPath();
-        var d = radius * 2;
-        path.AddArc(bounds.Left, bounds.Top, d, d, 180, 90);
-        path.AddArc(bounds.Right - d, bounds.Top, d, d, 270, 90);
-        path.AddArc(bounds.Right - d, bounds.Bottom - d, d, d, 0, 90);
-        path.AddArc(bounds.Left, bounds.Bottom - d, d, d, 90, 90);
+        var diameter = radius * 2;
+        path.AddArc(bounds.Left, bounds.Top, diameter, diameter, 180, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Top, diameter, diameter, 270, 90);
+        path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
+        path.AddArc(bounds.Left, bounds.Bottom - diameter, diameter, diameter, 90, 90);
         path.CloseFigure();
         graphics.FillPath(brush, path);
     }

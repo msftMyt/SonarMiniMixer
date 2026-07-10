@@ -55,6 +55,24 @@ var tests = new (string Name, Func<Task> Run)[]
         Contains(handler.Requests, "PUT /volumeSettings/classic/chatRender/Mute/true");
         Contains(handler.Requests, "PUT /chatMix?balance=-0.4");
     }),
+    ("client refuses known channels that are absent or non-classic", async () =>
+    {
+        var mode = "classic";
+        var sparseVolumes = "{\"masters\":{\"classic\":{\"volume\":1,\"muted\":false}},\"devices\":{}}";
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path == "/volumeSettings/classic") return Json(sparseVolumes);
+            if (path == "/chatMix") return Json("{\"balance\":0}");
+            if (path == "/mode/") return Json(System.Text.Json.JsonSerializer.Serialize(mode));
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler);
+        await ThrowsAsync<SonarConnectionException>(() => client.SetVolumeAsync("game", 0.5));
+        mode = "stream";
+        await ThrowsAsync<SonarConnectionException>(() => client.SetVolumeAsync("master", 0.5));
+        Equal(false, handler.Requests.Any(request => request.StartsWith("PUT", StringComparison.Ordinal)));
+    }),
     ("client rejects unsafe channels and out-of-range values", async () =>
     {
         using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), new RecordingHandler(_ => Json("{}")));

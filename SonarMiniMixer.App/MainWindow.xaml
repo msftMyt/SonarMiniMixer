@@ -18,7 +18,13 @@
     <Style x:Key="VerticalFader" TargetType="Slider">
       <Setter Property="Orientation" Value="Vertical"/><Setter Property="Minimum" Value="0"/><Setter Property="Maximum" Value="100"/>
       <Setter Property="Height" Value="126"/><Setter Property="Width" Value="46"/><Setter Property="IsMoveToPointEnabled" Value="True"/>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider"><Grid><Border Width="6" CornerRadius="3" Background="#312C3C" VerticalAlignment="Stretch" HorizontalAlignment="Center" Margin="0,8"/><Track x:Name="PART_Track" IsDirectionReversed="False"><Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton><Track.Thumb><Thumb Width="30" Height="12" Background="{Binding Accent}" Cursor="SizeNS"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border x:Name="T" CornerRadius="4" Background="{TemplateBinding Background}" BorderBrush="#E8E3EE" BorderThickness="1"><Border.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="0" Color="#99000000"/></Border.Effect></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="White"/><Setter TargetName="T" Property="BorderThickness" Value="2"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton></Track></Grid></ControlTemplate></Setter.Value></Setter>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider"><Grid><Border Width="6" CornerRadius="3" Background="#312C3C" VerticalAlignment="Stretch" HorizontalAlignment="Center" Margin="0,8"/>
+      <Track x:Name="PART_Track" Orientation="Vertical" IsDirectionReversed="False"
+             Minimum="{TemplateBinding Minimum}" Maximum="{TemplateBinding Maximum}" Value="{TemplateBinding Value}">
+        <Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton>
+        <Track.Thumb><Thumb Width="30" Height="12" Background="{Binding Accent}" Cursor="SizeNS"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border x:Name="T" CornerRadius="4" Background="{TemplateBinding Background}" BorderBrush="#E8E3EE" BorderThickness="1"><Border.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="0" Color="#99000000"/></Border.Effect></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="White"/><Setter TargetName="T" Property="BorderThickness" Value="2"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb>
+        <Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton>
+      </Track></Grid></ControlTemplate></Setter.Value></Setter>
     </Style>
   </Window.Resources>
 
@@ -57,9 +63,9 @@
           <Border BorderBrush="#302B3B" BorderThickness="0,0,1,0" Margin="2,0">
             <StackPanel HorizontalAlignment="Center">
               <TextBlock Text="{Binding Name}" Foreground="{Binding Accent}" FontSize="11" FontWeight="SemiBold" TextOptions.TextFormattingMode="Display" HorizontalAlignment="Center"/>
-              <Slider Style="{StaticResource VerticalFader}" Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Name}"/>
+              <Slider Style="{StaticResource VerticalFader}" Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Name, StringFormat={}{0} volume}" AutomationProperties.HelpText="Use arrow keys to change volume"/>
               <TextBlock Text="{Binding VolumeText, StringFormat={}{0}%}" Foreground="{StaticResource TextBrush}" FontSize="12" FontWeight="SemiBold" FontFamily="Consolas" HorizontalAlignment="Center"/>
-              <Button Style="{StaticResource MuteButton}" Content="{Binding MuteGlyph}" Click="Mute_Click" ToolTip="Mute or unmute" AutomationProperties.Name="Mute channel"/>
+              <Button Style="{StaticResource MuteButton}" Content="{Binding MuteGlyph}" Click="Mute_Click" ToolTip="Mute or unmute" AutomationProperties.Name="{Binding Name, StringFormat={}Mute {0}}"/>
             </StackPanel>
           </Border>
         </DataTemplate></ItemsControl.ItemTemplate>

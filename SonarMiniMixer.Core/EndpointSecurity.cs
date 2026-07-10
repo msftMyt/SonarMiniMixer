@@ -15,6 +15,7 @@ public static class EndpointSecurity
 
         if (!Uri.TryCreate(candidate, UriKind.Absolute, out var uri) ||
             uri.Scheme is not ("http" or "https") ||
+            uri.Port is < 1 or > 65535 ||
             !string.IsNullOrEmpty(uri.UserInfo) ||
             !string.IsNullOrEmpty(uri.Fragment) ||
             !IsLoopback(uri))

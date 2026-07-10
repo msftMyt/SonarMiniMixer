@@ -1,7 +1,6 @@
-﻿using System.Globalization;
-using System.ComponentModel;
+﻿using System.ComponentModel;
+using System.Globalization;
 using System.Windows;
-using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -35,17 +34,26 @@ public partial class MainWindow : Window
         SetPinned(_settings.Pinned, false);
         if (_pinned && _settings.Left is double left && _settings.Top is double top)
         {
-            Left = left; Top = top;
+            Left = left;
+            Top = top;
         }
+        else PositionNearTaskbar();
         await _viewModel.StartAsync();
     }
 
     public void ShowFromTray()
     {
         if (!_pinned) PositionNearTaskbar();
+        Topmost = true;
         Show();
         Activate();
         Focus();
+    }
+
+    public void ToggleFromTray()
+    {
+        if (IsVisible && !_pinned) Hide();
+        else ShowFromTray();
     }
 
     public void ExitApplication()
@@ -56,9 +64,16 @@ public partial class MainWindow : Window
 
     private void PositionNearTaskbar()
     {
-        var work = SystemParameters.WorkArea;
-        Left = Math.Max(work.Left + 12, work.Right - ActualWidth - 14);
-        Top = Math.Max(work.Top + 12, work.Bottom - ActualHeight - 14);
+        var cursor = System.Windows.Forms.Cursor.Position;
+        var screen = System.Windows.Forms.Screen.FromPoint(cursor);
+        var source = PresentationSource.FromVisual(this);
+        var fromPixels = source?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
+        var topLeft = fromPixels.Transform(new System.Windows.Point(screen.WorkingArea.Left, screen.WorkingArea.Top));
+        var bottomRight = fromPixels.Transform(new System.Windows.Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom));
+        var width = ActualWidth > 0 ? ActualWidth : Width;
+        var height = ActualHeight > 0 ? ActualHeight : Height;
+        Left = Math.Clamp(bottomRight.X - width - 14, topLeft.X + 12, Math.Max(topLeft.X + 12, bottomRight.X - width - 12));
+        Top = Math.Clamp(bottomRight.Y - height - 14, topLeft.Y + 12, Math.Max(topLeft.Y + 12, bottomRight.Y - height - 12));
     }
 
     private async void Pin_Click(object sender, RoutedEventArgs e) => await SetPinnedAsync(!_pinned);
@@ -82,7 +97,11 @@ public partial class MainWindow : Window
 
     private void Window_Deactivated(object? sender, EventArgs e)
     {
-        if (!_pinned && IsVisible) Hide();
+        if (!_pinned && IsVisible)
+        {
+            Hide();
+            Topmost = false;
+        }
     }
 
     private void Header_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)

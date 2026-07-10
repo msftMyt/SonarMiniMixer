@@ -13,6 +13,11 @@ internal static class StartupRegistration
         return key?.GetValue(ValueName) is string;
     }
 
+    public static void RepairIfEnabled()
+    {
+        if (IsEnabled()) SetEnabled(true);
+    }
+
     public static void SetEnabled(bool enabled)
     {
         using var key = Registry.CurrentUser.CreateSubKey(RunKey);

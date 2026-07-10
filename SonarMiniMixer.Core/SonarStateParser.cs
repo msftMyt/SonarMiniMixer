@@ -43,9 +43,7 @@ public static class SonarStateParser
         }
     }
 
-    public static bool IsSafeChannel(string channel) =>
-        !string.IsNullOrWhiteSpace(channel) && channel.Length <= 64 &&
-        channel.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
+    public static bool IsSafeChannel(string channel) => Metadata.ContainsKey(channel);
 
     private static void AddChannel(List<MixerChannel> channels, string id, JsonElement source)
     {

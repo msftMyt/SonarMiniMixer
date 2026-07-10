@@ -17,6 +17,7 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     private bool _connected;
     private bool _canControl;
     private double _chatMix;
+    private CancellationTokenSource? _chatMixDebounce;
 
     public ObservableCollection<ChannelViewModel> Channels { get; } = [];
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -29,7 +30,10 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         set
         {
             if (!Set(ref _chatMix, value) || _isApplyingState || !CanControl) return;
-            _ = WriteChatMixAsync(value);
+            _chatMixDebounce?.Cancel();
+            _chatMixDebounce?.Dispose();
+            _chatMixDebounce = new CancellationTokenSource();
+            _ = DebounceChatMixAsync(value, _chatMixDebounce.Token);
         }
     }
 
@@ -64,7 +68,13 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
                 else existing.Apply(channel);
             }
             for (var i = Channels.Count - 1; i >= 0; i--)
-                if (!state.Channels.Any(x => x.Id == Channels[i].Id)) Channels.RemoveAt(i);
+            {
+                if (!state.Channels.Any(x => x.Id == Channels[i].Id))
+                {
+                    Channels[i].Dispose();
+                    Channels.RemoveAt(i);
+                }
+            }
             ChatMix = state.ChatMix * 100;
             CanControl = state.CanControl;
             Connected = true;
@@ -97,9 +107,14 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         catch { await RefreshAsync(); }
     }
 
-    private async Task WriteChatMixAsync(double percent)
+    private async Task DebounceChatMixAsync(double percent, CancellationToken token)
     {
-        try { await _client.SetChatMixAsync(Math.Clamp(percent / 100, -1, 1)); }
+        try
+        {
+            await Task.Delay(90, token);
+            await _client.SetChatMixAsync(Math.Clamp(percent / 100, -1, 1), token);
+        }
+        catch (OperationCanceledException) { }
         catch { await RefreshAsync(); }
     }
 
@@ -110,10 +125,18 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
-    public void Dispose() { _pollTimer.Stop(); _refreshGate.Dispose(); if (_client is IDisposable disposable) disposable.Dispose(); }
+    public void Dispose()
+    {
+        _pollTimer.Stop();
+        _chatMixDebounce?.Cancel();
+        _chatMixDebounce?.Dispose();
+        foreach (var channel in Channels) channel.Dispose();
+        _refreshGate.Dispose();
+        if (_client is IDisposable disposable) disposable.Dispose();
+    }
 }
 
-public sealed class ChannelViewModel : INotifyPropertyChanged
+public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
 {
     private readonly MixerViewModel _owner;
     private double _volume;
@@ -131,6 +154,7 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
             if (!Set(ref _volume, value)) return;
             OnPropertyChanged(nameof(VolumeText));
             _volumeDebounce?.Cancel();
+            _volumeDebounce?.Dispose();
             _volumeDebounce = new CancellationTokenSource();
             _ = DebounceVolumeAsync(value, _volumeDebounce.Token);
         }
@@ -148,6 +172,8 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
     internal void Apply(MixerChannel source)
     {
         _volumeDebounce?.Cancel();
+        _volumeDebounce?.Dispose();
+        _volumeDebounce = null;
         _volume = source.Volume * 100; _muted = source.Muted;
         OnPropertyChanged(nameof(Volume)); OnPropertyChanged(nameof(VolumeText)); OnPropertyChanged(nameof(Muted)); OnPropertyChanged(nameof(MuteGlyph));
     }
@@ -167,4 +193,5 @@ public sealed class ChannelViewModel : INotifyPropertyChanged
     }
     private void OnPropertyChanged([CallerMemberName] string? name = null) => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     public event PropertyChangedEventHandler? PropertyChanged;
+    public void Dispose() { _volumeDebounce?.Cancel(); _volumeDebounce?.Dispose(); }
 }

@@ -6,6 +6,7 @@ public sealed class SonarClient : ISonarClient, IDisposable
 {
     private readonly ISonarEndpointProvider _endpoints;
     private readonly HttpClient _http;
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public SonarClient(ISonarEndpointProvider endpoints, HttpMessageHandler? handler = null)
     {
@@ -28,13 +29,13 @@ public sealed class SonarClient : ISonarClient, IDisposable
     {
         if (volume is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(volume));
         ValidateChannel(channel);
-        return PutAsync($"volumeSettings/classic/{channel}/Volume/{volume.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
+        return PutChannelAsync(channel, $"Volume/{volume.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
     }
 
     public Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default)
     {
         ValidateChannel(channel);
-        return PutAsync($"volumeSettings/classic/{channel}/Mute/{muted.ToString().ToLowerInvariant()}", cancellationToken);
+        return PutChannelAsync(channel, $"Mute/{muted.ToString().ToLowerInvariant()}", cancellationToken);
     }
 
     public Task SetChatMixAsync(double balance, CancellationToken cancellationToken = default)
@@ -44,12 +45,27 @@ public sealed class SonarClient : ISonarClient, IDisposable
     }
 
     private Task PutAsync(string relativeUri, CancellationToken cancellationToken) =>
-        ExecuteAsync(async baseUri =>
+        SerializeWriteAsync(() => ExecuteAsync(async baseUri =>
         {
             using var response = await _http.PutAsync(new Uri(baseUri, relativeUri), new ByteArrayContent([]), cancellationToken);
             response.EnsureSuccessStatusCode();
             return true;
-        }, cancellationToken);
+        }, cancellationToken), cancellationToken);
+
+    private async Task SerializeWriteAsync(Func<Task<bool>> write, CancellationToken cancellationToken)
+    {
+        await _writeGate.WaitAsync(cancellationToken);
+        try { await write(); }
+        finally { _writeGate.Release(); }
+    }
+
+    private async Task PutChannelAsync(string channel, string operation, CancellationToken cancellationToken)
+    {
+        var state = await GetStateAsync(cancellationToken);
+        if (!state.CanControl || !state.Channels.Any(candidate => candidate.Id == channel))
+            throw new SonarConnectionException($"Sonar channel '{channel}' is not controllable in the current mode.");
+        await PutAsync($"volumeSettings/classic/{channel}/{operation}", cancellationToken);
+    }
 
     private async Task<string> GetStringAsync(Uri baseUri, string relativeUri, CancellationToken cancellationToken)
     {
@@ -80,5 +96,5 @@ public sealed class SonarClient : ISonarClient, IDisposable
         if (!SonarStateParser.IsSafeChannel(channel)) throw new ArgumentException("Unsafe Sonar channel id.", nameof(channel));
     }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose() { _http.Dispose(); _writeGate.Dispose(); }
 }

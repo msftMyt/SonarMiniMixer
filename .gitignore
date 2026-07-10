@@ -4,3 +4,15 @@ artifacts/
 .vs/
 *.user
 *.suo
+*.log
+*.tmp
+*.cache
+.env
+.env.*
+!.env.example
+*.pfx
+*.pem
+*.key
+*.cer
+*.crt
+settings.json
