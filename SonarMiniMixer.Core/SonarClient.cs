@@ -8,6 +8,7 @@ public sealed class SonarClient : ISonarClient, IDisposable
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
     private readonly ISonarAudioController _audio;
+    private readonly SteelSeriesGgActionClient _ggActions = new();
 
     public SonarClient(ISonarEndpointProvider endpoints, HttpMessageHandler? handler = null, ISonarAudioController? audio = null)
     {
@@ -77,7 +78,10 @@ public sealed class SonarClient : ISonarClient, IDisposable
         var state = await GetStateAsync(cancellationToken);
         if (!state.CanControlChatMix)
             throw new SonarConnectionException("Sonar ChatMix is not controllable in the current device configuration.");
+        var towardChatFirst = balance < 0.95;
         await PutAsync($"chatMix?balance={balance.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
+        await _ggActions.AdjustChatMixAsync(towardChatFirst, cancellationToken);
+        await _ggActions.AdjustChatMixAsync(!towardChatFirst, cancellationToken);
     }
 
     private async Task<string> GetStringAsync(Uri baseUri, string relativeUri, CancellationToken cancellationToken)

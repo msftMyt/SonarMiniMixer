@@ -11,7 +11,7 @@ public sealed class WindowsSonarAudioController : ISonarAudioController
             ["chatRender"] = (["SteelSeries Sonar - Chat"], DataFlow.Render),
             ["media"] = (["SteelSeries Sonar - Media"], DataFlow.Render),
             ["aux"] = (["SteelSeries Sonar - Aux"], DataFlow.Render),
-            ["chatCapture"] = (["SteelSeries Sonar - Microphone"], DataFlow.Capture)
+            ["chatCapture"] = (["SteelSeries Sonar - Microphone"], DataFlow.Render)
         };
 
     private static readonly string[] MasterChannels = ["game", "chatRender", "media", "aux"];

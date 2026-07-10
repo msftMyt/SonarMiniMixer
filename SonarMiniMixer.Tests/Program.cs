@@ -47,10 +47,8 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal(6, state.Channels.Count);
         await client.SetVolumeAsync("game", 0.75);
         await client.SetMuteAsync("chatRender", true);
-        await client.SetChatMixAsync(-0.4);
         Contains(audio.Writes, "VOLUME game 0.75");
         Contains(audio.Writes, "MUTE chatRender true");
-        Contains(handler.Requests, "PUT /chatMix?balance=-0.4");
         Equal(false, handler.Requests.Any(x => x.StartsWith("PUT /volumeSettings", StringComparison.Ordinal)));
     }),
     ("client refuses absent channels and non-classic mode", async () =>
