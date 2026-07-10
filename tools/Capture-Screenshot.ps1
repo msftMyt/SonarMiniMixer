@@ -2,10 +2,13 @@ $ErrorActionPreference = 'Stop'
 $exe = "$env:LOCALAPPDATA\Programs\SonarMiniMixer\SonarMiniMixer.exe"
 $cli = "$env:LOCALAPPDATA\Programs\SonarMiniMixer\SonarMiniMixer.Cli.exe"
 $project = Split-Path -Parent $PSScriptRoot
-$out = Join-Path $project 'artifacts\SonarMiniMixer-screenshot.png'
+$out = Join-Path $project 'docs\images\sonar-mini-mixer.png'
+New-Item -ItemType Directory -Force (Split-Path -Parent $out) | Out-Null
 Get-Process SonarMiniMixer -ErrorAction SilentlyContinue | Stop-Process -Force
 $p = Start-Process $exe -PassThru
 Start-Sleep -Seconds 3
+& $cli show | Out-Null
+Start-Sleep -Seconds 2
 Add-Type -AssemblyName System.Drawing
 Add-Type @'
 using System;
