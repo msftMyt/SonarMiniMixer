@@ -75,9 +75,9 @@
         <Grid Margin="18,7,18,8">
           <Grid.ColumnDefinitions><ColumnDefinition Width="82"/><ColumnDefinition Width="*"/><ColumnDefinition Width="54"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel VerticalAlignment="Center"><TextBlock Text="CHATMIX" Foreground="#FFB86C" FontWeight="SemiBold" FontSize="11"/><TextBlock Text="GAME  ←  →  CHAT" Foreground="#777082" FontSize="9" Margin="0,3,0,0"/></StackPanel>
-          <Slider Grid.Column="1" Minimum="-100" Maximum="100" Value="{Binding ChatMix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsMoveToPointEnabled="True" IsEnabled="{Binding CanControl}" Margin="12,0" VerticalAlignment="Center" AutomationProperties.Name="Game and chat balance"/>
+          <Slider Grid.Column="1" Minimum="-100" Maximum="100" Value="{Binding ChatMix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsMoveToPointEnabled="True" IsEnabled="{Binding CanControlChatMix}" Margin="12,0" VerticalAlignment="Center" AutomationProperties.Name="Game and chat balance"/>
           <TextBlock Grid.Column="2" Text="{Binding ChatMix, StringFormat={}{0:0}}" Foreground="{StaticResource TextBrush}" FontFamily="Consolas" FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-          <Button Grid.Column="3" Content="CENTER" Click="CenterChatMix_Click" Padding="10,5" Background="#2B2737" Foreground="#CFC8DA" BorderBrush="#443D52" Cursor="Hand" ToolTip="Reset ChatMix to center"/>
+          <Button Grid.Column="3" Content="CENTER" Click="CenterChatMix_Click" IsEnabled="{Binding CanControlChatMix}" Padding="10,5" Background="#2B2737" Foreground="#CFC8DA" BorderBrush="#443D52" Cursor="Hand" ToolTip="Reset ChatMix to center"/>
         </Grid>
       </Border>
     </Grid>

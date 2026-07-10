@@ -23,7 +23,8 @@ public static class SonarStateParser
         {
             using var volumes = JsonDocument.Parse(volumesJson);
             using var chatMix = JsonDocument.Parse(chatMixJson);
-            var mode = JsonSerializer.Deserialize<string>(modeJson) ?? "classic";
+            var mode = JsonSerializer.Deserialize<string>(modeJson);
+            if (string.IsNullOrWhiteSpace(mode)) mode = "unknown";
             var channels = new List<MixerChannel>();
 
             if (volumes.RootElement.TryGetProperty("masters", out var master))
@@ -35,7 +36,10 @@ public static class SonarStateParser
 
             channels.Sort((a, b) => a.SortOrder.CompareTo(b.SortOrder));
             var balance = chatMix.RootElement.TryGetProperty("balance", out var value) ? value.GetDouble() : 0;
-            return new MixerState(mode, channels, Math.Clamp(balance, -1, 1));
+            var chatMixState = chatMix.RootElement.TryGetProperty("state", out var state) && state.ValueKind == JsonValueKind.String
+                ? state.GetString() ?? "unknown"
+                : "enabled";
+            return new MixerState(mode, channels, Math.Clamp(balance, -1, 1), chatMixState);
         }
         catch (Exception exception) when (exception is JsonException or InvalidOperationException)
         {
@@ -44,6 +48,7 @@ public static class SonarStateParser
     }
 
     public static bool IsSafeChannel(string channel) => Metadata.ContainsKey(channel);
+    public static string GetWireChannel(string channel) => channel == "master" ? "Master" : channel;
 
     private static void AddChannel(List<MixerChannel> channels, string id, JsonElement source)
     {

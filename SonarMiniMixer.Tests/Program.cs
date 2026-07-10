@@ -21,7 +21,7 @@ var tests = new (string Name, Func<Task> Run)[]
     })),
     ("state parser maps every classic channel", () => Sync(() =>
     {
-        var state = SonarStateParser.Parse(VolumesJson, "{\"balance\":-0.25}", "\"classic\"");
+        var state = SonarStateParser.Parse(VolumesJson, "{\"balance\":-0.25,\"state\":\"enabled\"}", "\"classic\"");
         Equal("classic", state.Mode);
         Equal(6, state.Channels.Count);
         Equal("Mic", state.Channels.Single(x => x.Id == "chatCapture").Name);
@@ -29,56 +29,80 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal(true, state.Channels.Single(x => x.Id == "media").Muted);
         Equal(-0.25, state.ChatMix);
         Equal(true, state.CanControl);
+        Equal(true, state.CanControlChatMix);
     })),
-    ("state parser marks non-classic mode read-only", () => Sync(() =>
+    ("state parser fails closed on null mode and disabled ChatMix", () => Sync(() =>
     {
-        var state = SonarStateParser.Parse(VolumesJson, "{\"balance\":0}", "\"stream\"");
+        var state = SonarStateParser.Parse(VolumesJson, "{\"balance\":0.4,\"state\":\"differentDeviceSelected\"}", "null");
+        Equal("unknown", state.Mode);
         Equal(false, state.CanControl);
+        Equal(false, state.CanControlChatMix);
     })),
-    ("client reads state and emits bounded API writes", async () =>
+    ("client writes channel changes through Core Audio", async () =>
     {
-        var handler = new RecordingHandler(request =>
-        {
-            var path = request.RequestUri!.PathAndQuery;
-            if (request.Method == HttpMethod.Get && path == "/volumeSettings/classic") return Json(VolumesJson);
-            if (request.Method == HttpMethod.Get && path == "/chatMix") return Json("{\"balance\":0.1}");
-            if (request.Method == HttpMethod.Get && path == "/mode/") return Json("\"classic\"");
-            return new HttpResponseMessage(HttpStatusCode.NoContent);
-        });
-        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler);
+        var handler = HealthyHandler();
+        var audio = new RecordingAudioController();
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
         var state = await client.GetStateAsync();
         Equal(6, state.Channels.Count);
         await client.SetVolumeAsync("game", 0.75);
         await client.SetMuteAsync("chatRender", true);
         await client.SetChatMixAsync(-0.4);
-        Contains(handler.Requests, "PUT /volumeSettings/classic/game/Volume/0.75");
-        Contains(handler.Requests, "PUT /volumeSettings/classic/chatRender/Mute/true");
+        Contains(audio.Writes, "VOLUME game 0.75");
+        Contains(audio.Writes, "MUTE chatRender true");
         Contains(handler.Requests, "PUT /chatMix?balance=-0.4");
+        Equal(false, handler.Requests.Any(x => x.StartsWith("PUT /volumeSettings", StringComparison.Ordinal)));
     }),
-    ("client refuses known channels that are absent or non-classic", async () =>
+    ("client refuses absent channels and non-classic mode", async () =>
     {
         var mode = "classic";
         var sparseVolumes = "{\"masters\":{\"classic\":{\"volume\":1,\"muted\":false}},\"devices\":{}}";
-        var handler = new RecordingHandler(request =>
+        var handler = new RecordingHandler(request => request.RequestUri!.AbsolutePath switch
         {
-            var path = request.RequestUri!.AbsolutePath;
-            if (path == "/volumeSettings/classic") return Json(sparseVolumes);
-            if (path == "/chatMix") return Json("{\"balance\":0}");
-            if (path == "/mode/") return Json(System.Text.Json.JsonSerializer.Serialize(mode));
-            return new HttpResponseMessage(HttpStatusCode.NoContent);
+            "/volumeSettings/classic" => Json(sparseVolumes),
+            "/chatMix" => Json("{\"balance\":0,\"state\":\"enabled\"}"),
+            "/mode/" => Json(System.Text.Json.JsonSerializer.Serialize(mode)),
+            _ => new HttpResponseMessage(HttpStatusCode.NoContent)
         });
-        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler);
+        var audio = new RecordingAudioController();
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
         await ThrowsAsync<SonarConnectionException>(() => client.SetVolumeAsync("game", 0.5));
         mode = "stream";
         await ThrowsAsync<SonarConnectionException>(() => client.SetVolumeAsync("master", 0.5));
-        Equal(false, handler.Requests.Any(request => request.StartsWith("PUT", StringComparison.Ordinal)));
+        Equal(0, audio.Writes.Count);
     }),
-    ("client rejects unsafe channels and out-of-range values", async () =>
+    ("client refuses ChatMix outside Classic or when disabled", async () =>
     {
-        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), new RecordingHandler(_ => Json("{}")));
+        var mode = "stream";
+        var chatMix = "{\"balance\":0,\"state\":\"enabled\"}";
+        var handler = new RecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/volumeSettings/classic" => Json(VolumesJson),
+            "/chatMix" => Json(chatMix),
+            "/mode/" => Json(System.Text.Json.JsonSerializer.Serialize(mode)),
+            _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        await ThrowsAsync<SonarConnectionException>(() => client.SetChatMixAsync(0.5));
+        mode = "classic";
+        chatMix = "{\"balance\":0,\"state\":\"differentDeviceSelected\"}";
+        await ThrowsAsync<SonarConnectionException>(() => client.SetChatMixAsync(0.5));
+        Equal(false, handler.Requests.Any(x => x.StartsWith("PUT", StringComparison.Ordinal)));
+    }),
+    ("client rejects unsafe and non-finite values", async () =>
+    {
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), new RecordingHandler(_ => Json("{}")), new RecordingAudioController());
         await ThrowsAsync<ArgumentOutOfRangeException>(() => client.SetVolumeAsync("game", 1.1));
+        await ThrowsAsync<ArgumentOutOfRangeException>(() => client.SetVolumeAsync("game", double.NaN));
         await ThrowsAsync<ArgumentException>(() => client.SetVolumeAsync("../game", 0.5));
-        await ThrowsAsync<ArgumentOutOfRangeException>(() => client.SetChatMixAsync(-1.1));
+        await ThrowsAsync<ArgumentOutOfRangeException>(() => client.SetChatMixAsync(double.PositiveInfinity));
+    }),
+    ("client does not retry HTTP status failures", async () =>
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.Forbidden));
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        await ThrowsAsync<HttpRequestException>(() => client.GetStateAsync());
+        Equal(3, handler.Requests.Count);
     }),
     ("client invalidates and retries endpoint after transport failure", async () =>
     {
@@ -87,18 +111,16 @@ var tests = new (string Name, Func<Task> Run)[]
         var handler = new RecordingHandler(request =>
         {
             if (first) { first = false; throw new HttpRequestException("stale port"); }
-            var path = request.RequestUri!.AbsolutePath;
-            return path switch
+            return request.RequestUri!.AbsolutePath switch
             {
                 "/volumeSettings/classic" => Json(VolumesJson),
-                "/chatMix" => Json("{\"balance\":0}"),
+                "/chatMix" => Json("{\"balance\":0,\"state\":\"enabled\"}"),
                 "/mode/" => Json("\"classic\""),
                 _ => new HttpResponseMessage(HttpStatusCode.NotFound)
             };
         });
-        using var client = new SonarClient(endpoints, handler);
-        var state = await client.GetStateAsync();
-        Equal(6, state.Channels.Count);
+        using var client = new SonarClient(endpoints, handler, new RecordingAudioController());
+        Equal(6, (await client.GetStateAsync()).Channels.Count);
         Equal(1, endpoints.Invalidations);
         Equal(true, handler.Authorities.Contains("127.0.0.1:64708"));
     }),
@@ -127,6 +149,13 @@ foreach (var (name, run) in tests)
 Console.WriteLine($"RESULT {tests.Length - failed}/{tests.Length} passed");
 return failed == 0 ? 0 : 1;
 
+static RecordingHandler HealthyHandler() => new(request => request.RequestUri!.AbsolutePath switch
+{
+    "/volumeSettings/classic" => Json(VolumesJson),
+    "/chatMix" => Json("{\"balance\":0.1,\"state\":\"enabled\"}"),
+    "/mode/" => Json("\"classic\""),
+    _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+});
 static Task Sync(Action action) { action(); return Task.CompletedTask; }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"expected {expected}, got {actual}"); }
 static void Contains(IEnumerable<string> values, string expected) { if (!values.Contains(expected)) throw new Exception($"missing '{expected}' in [{string.Join(", ", values)}]"); }
@@ -139,7 +168,6 @@ sealed class FixedEndpointProvider(string endpoint) : ISonarEndpointProvider
     public Task<Uri> GetAsync(CancellationToken cancellationToken = default) => Task.FromResult(new Uri(endpoint));
     public void Invalidate() { }
 }
-
 sealed class RotatingEndpointProvider : ISonarEndpointProvider
 {
     private int _generation;
@@ -147,7 +175,6 @@ sealed class RotatingEndpointProvider : ISonarEndpointProvider
     public Task<Uri> GetAsync(CancellationToken cancellationToken = default) => Task.FromResult(new Uri($"http://127.0.0.1:{64707 + _generation}/"));
     public void Invalidate() { Invalidations++; _generation++; }
 }
-
 sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> responder) : HttpMessageHandler
 {
     public List<string> Requests { get; } = [];
@@ -157,5 +184,19 @@ sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> resp
         Requests.Add($"{request.Method} {request.RequestUri!.PathAndQuery}");
         Authorities.Add(request.RequestUri.Authority);
         return Task.FromResult(responder(request));
+    }
+}
+sealed class RecordingAudioController : ISonarAudioController
+{
+    public List<string> Writes { get; } = [];
+    public Task SetVolumeAsync(string channel, double volume, CancellationToken cancellationToken = default)
+    {
+        Writes.Add($"VOLUME {channel} {volume.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+        return Task.CompletedTask;
+    }
+    public Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default)
+    {
+        Writes.Add($"MUTE {channel} {muted.ToString().ToLowerInvariant()}");
+        return Task.CompletedTask;
     }
 }

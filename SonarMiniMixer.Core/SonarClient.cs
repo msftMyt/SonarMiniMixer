@@ -7,11 +7,13 @@ public sealed class SonarClient : ISonarClient, IDisposable
     private readonly ISonarEndpointProvider _endpoints;
     private readonly HttpClient _http;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly ISonarAudioController _audio;
 
-    public SonarClient(ISonarEndpointProvider endpoints, HttpMessageHandler? handler = null)
+    public SonarClient(ISonarEndpointProvider endpoints, HttpMessageHandler? handler = null, ISonarAudioController? audio = null)
     {
         _endpoints = endpoints;
         _http = handler is null ? new HttpClient() : new HttpClient(handler);
+        _audio = audio ?? new WindowsSonarAudioController();
         _http.Timeout = TimeSpan.FromSeconds(4);
     }
 
@@ -27,7 +29,7 @@ public sealed class SonarClient : ISonarClient, IDisposable
 
     public Task SetVolumeAsync(string channel, double volume, CancellationToken cancellationToken = default)
     {
-        if (volume is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(volume));
+        if (!double.IsFinite(volume) || volume is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(volume));
         ValidateChannel(channel);
         return PutChannelAsync(channel, $"Volume/{volume.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
     }
@@ -40,8 +42,8 @@ public sealed class SonarClient : ISonarClient, IDisposable
 
     public Task SetChatMixAsync(double balance, CancellationToken cancellationToken = default)
     {
-        if (balance is < -1 or > 1) throw new ArgumentOutOfRangeException(nameof(balance));
-        return PutAsync($"chatMix?balance={balance.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
+        if (!double.IsFinite(balance) || balance is < -1 or > 1) throw new ArgumentOutOfRangeException(nameof(balance));
+        return PutChatMixAsync(balance, cancellationToken);
     }
 
     private Task PutAsync(string relativeUri, CancellationToken cancellationToken) =>
@@ -64,7 +66,18 @@ public sealed class SonarClient : ISonarClient, IDisposable
         var state = await GetStateAsync(cancellationToken);
         if (!state.CanControl || !state.Channels.Any(candidate => candidate.Id == channel))
             throw new SonarConnectionException($"Sonar channel '{channel}' is not controllable in the current mode.");
-        await PutAsync($"volumeSettings/classic/{channel}/{operation}", cancellationToken);
+        if (operation.StartsWith("Volume/", StringComparison.Ordinal))
+            await _audio.SetVolumeAsync(channel, double.Parse(operation[7..], CultureInfo.InvariantCulture), cancellationToken);
+        else
+            await _audio.SetMuteAsync(channel, bool.Parse(operation[5..]), cancellationToken);
+    }
+
+    private async Task PutChatMixAsync(double balance, CancellationToken cancellationToken)
+    {
+        var state = await GetStateAsync(cancellationToken);
+        if (!state.CanControlChatMix)
+            throw new SonarConnectionException("Sonar ChatMix is not controllable in the current device configuration.");
+        await PutAsync($"chatMix?balance={balance.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
     }
 
     private async Task<string> GetStringAsync(Uri baseUri, string relativeUri, CancellationToken cancellationToken)
@@ -81,8 +94,8 @@ public sealed class SonarClient : ISonarClient, IDisposable
         {
             try { return await operation(await _endpoints.GetAsync(cancellationToken)); }
             catch (Exception exception) when (
-                exception is HttpRequestException or TaskCanceledException &&
-                !cancellationToken.IsCancellationRequested)
+                !cancellationToken.IsCancellationRequested &&
+                (exception is HttpRequestException { StatusCode: null } || exception is TaskCanceledException))
             {
                 firstFailure ??= exception;
                 _endpoints.Invalidate();

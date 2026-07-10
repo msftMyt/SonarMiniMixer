@@ -16,6 +16,7 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     private string _statusDetail = "Finding SteelSeries Sonar...";
     private bool _connected;
     private bool _canControl;
+    private bool _canControlChatMix;
     private double _chatMix;
     private CancellationTokenSource? _chatMixDebounce;
 
@@ -24,12 +25,13 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     public string StatusDetail { get => _statusDetail; private set => Set(ref _statusDetail, value); }
     public bool Connected { get => _connected; private set => Set(ref _connected, value); }
     public bool CanControl { get => _canControl; private set => Set(ref _canControl, value); }
+    public bool CanControlChatMix { get => _canControlChatMix; private set => Set(ref _canControlChatMix, value); }
     public double ChatMix
     {
         get => _chatMix;
         set
         {
-            if (!Set(ref _chatMix, value) || _isApplyingState || !CanControl) return;
+            if (_isApplyingState || !CanControlChatMix || !Set(ref _chatMix, value)) return;
             _chatMixDebounce?.Cancel();
             _chatMixDebounce?.Dispose();
             _chatMixDebounce = new CancellationTokenSource();
@@ -77,6 +79,7 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
             }
             ChatMix = state.ChatMix * 100;
             CanControl = state.CanControl;
+            CanControlChatMix = state.CanControlChatMix;
             Connected = true;
             Status = state.CanControl ? "Sonar connected" : $"{state.Mode} mode";
             StatusDetail = state.CanControl ? "Live · Classic mixer" : "Switch Sonar to Classic mode to make changes";
@@ -85,6 +88,7 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         {
             Connected = false;
             CanControl = false;
+            CanControlChatMix = false;
             Status = "Sonar unavailable";
             StatusDetail = exception is SonarConnectionException ? exception.Message : "SteelSeries GG did not respond.";
         }

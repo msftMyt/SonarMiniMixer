@@ -11,9 +11,11 @@ public sealed record MixerChannel(
 public sealed record MixerState(
     string Mode,
     IReadOnlyList<MixerChannel> Channels,
-    double ChatMix)
+    double ChatMix,
+    string ChatMixState)
 {
     public bool CanControl => string.Equals(Mode, "classic", StringComparison.OrdinalIgnoreCase);
+    public bool CanControlChatMix => CanControl && string.Equals(ChatMixState, "enabled", StringComparison.OrdinalIgnoreCase);
 }
 
 public interface ISonarEndpointProvider
@@ -28,6 +30,12 @@ public interface ISonarClient
     Task SetVolumeAsync(string channel, double volume, CancellationToken cancellationToken = default);
     Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default);
     Task SetChatMixAsync(double balance, CancellationToken cancellationToken = default);
+}
+
+public interface ISonarAudioController
+{
+    Task SetVolumeAsync(string channel, double volume, CancellationToken cancellationToken = default);
+    Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default);
 }
 
 public sealed class SonarConnectionException(string message, Exception? inner = null) : Exception(message, inner);

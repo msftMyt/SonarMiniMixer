@@ -44,6 +44,8 @@ try
         mode = state.Mode,
         canControl = state.CanControl,
         chatMix = state.ChatMix,
+        chatMixState = state.ChatMixState,
+        canControlChatMix = state.CanControlChatMix,
         channels = state.Channels.Select(x => new { x.Id, x.Name, x.Volume, x.Muted })
     }, new JsonSerializerOptions { WriteIndented = true }));
     if (command == "selftest") Console.WriteLine("SELFTEST PASS: read-only Sonar discovery and mixer read succeeded; writes skipped.");

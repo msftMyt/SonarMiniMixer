@@ -121,7 +121,7 @@ public partial class MainWindow : Window
     private void Window_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
     {
         if (e.Key == Key.Escape && !_pinned) { Hide(); e.Handled = true; }
-        if (e.Key == Key.D0 && Keyboard.Modifiers.HasFlag(ModifierKeys.Control)) { _viewModel.ChatMix = 0; e.Handled = true; }
+        if (e.Key == Key.D0 && Keyboard.Modifiers.HasFlag(ModifierKeys.Control) && _viewModel.CanControlChatMix) { _viewModel.ChatMix = 0; e.Handled = true; }
     }
 
     private async void Window_Closing(object? sender, CancelEventArgs e)

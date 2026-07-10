@@ -16,7 +16,7 @@ A compact Windows tray controller for the SteelSeries Sonar mixer. It gives you 
 - Optionally starts with Windows
 - Runs entirely on your PC and talks only to Sonar's loopback service
 
-It does **not** install audio drivers, process audio, create virtual devices, change application routing, or send telemetry.
+The application uses a hybrid local integration: it reads mixer state and ChatMix through Sonar's loopback service, while channel volume and mute changes use the corresponding Windows Core Audio endpoints. That native path lets Sonar observe the change and keep SteelSeries GG's mixer UI synchronized. It does **not** install drivers or control unrelated audio endpoints.
 
 ## Requirements
 
@@ -80,6 +80,7 @@ Open **Settings**, enable **Start Sonar Mini Mixer with Windows**, and choose **
 
 - No analytics, telemetry, accounts, ads, or network cloud services
 - Reads SteelSeries GG's local `coreProps.json` only to discover Sonar's current loopback port
+- Uses Windows Core Audio only for endpoints whose friendly names match the six SteelSeries Sonar virtual channels
 - Rejects non-loopback service addresses
 - Ignores GG's self-signed certificate only for a validated loopback address
 - Accepts IPC commands only from the current Windows user
