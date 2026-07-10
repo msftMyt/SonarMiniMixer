@@ -1,0 +1,79 @@
+﻿<Window x:Class="SonarMiniMixer.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:SonarMiniMixer.App"
+        Title="Sonar Mini Mixer" Width="690" Height="330" MinWidth="620" MinHeight="300"
+        WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True" Background="Transparent"
+        ShowInTaskbar="False" Topmost="True" Deactivated="Window_Deactivated"
+        PreviewKeyDown="Window_PreviewKeyDown" AutomationProperties.Name="Sonar Mini Mixer">
+  <Window.Resources>
+    <BooleanToVisibilityConverter x:Key="BoolVisibility"/>
+    <local:ConnectionBrushConverter x:Key="ConnectionBrushConverter"/>
+    <Style x:Key="MuteButton" TargetType="Button">
+      <Setter Property="Width" Value="36"/><Setter Property="Height" Value="30"/><Setter Property="Margin" Value="0,5,0,0"/>
+      <Setter Property="Foreground" Value="#C9C3D3"/><Setter Property="Background" Value="#262231"/><Setter Property="BorderBrush" Value="#3A3547"/>
+      <Setter Property="BorderThickness" Value="1"/><Setter Property="FontSize" Value="18"/><Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="B" CornerRadius="7" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="#393346"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#BD93F9"/><Setter TargetName="B" Property="BorderThickness" Value="2"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+    </Style>
+    <Style x:Key="VerticalFader" TargetType="Slider">
+      <Setter Property="Orientation" Value="Vertical"/><Setter Property="Minimum" Value="0"/><Setter Property="Maximum" Value="100"/>
+      <Setter Property="Height" Value="126"/><Setter Property="Width" Value="46"/><Setter Property="IsMoveToPointEnabled" Value="True"/>
+      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Slider"><Grid><Border Width="6" CornerRadius="3" Background="#312C3C" VerticalAlignment="Stretch" HorizontalAlignment="Center" Margin="0,8"/><Track x:Name="PART_Track" IsDirectionReversed="False"><Track.DecreaseRepeatButton><RepeatButton Command="Slider.DecreaseLarge" Opacity="0" Focusable="False"/></Track.DecreaseRepeatButton><Track.Thumb><Thumb Width="30" Height="12" Background="{Binding Accent}" Cursor="SizeNS"><Thumb.Template><ControlTemplate TargetType="Thumb"><Border x:Name="T" CornerRadius="4" Background="{TemplateBinding Background}" BorderBrush="#E8E3EE" BorderThickness="1"><Border.Effect><DropShadowEffect BlurRadius="8" ShadowDepth="0" Color="#99000000"/></Border.Effect></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="T" Property="BorderBrush" Value="White"/><Setter TargetName="T" Property="BorderThickness" Value="2"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Thumb.Template></Thumb></Track.Thumb><Track.IncreaseRepeatButton><RepeatButton Command="Slider.IncreaseLarge" Opacity="0" Focusable="False"/></Track.IncreaseRepeatButton></Track></Grid></ControlTemplate></Setter.Value></Setter>
+    </Style>
+  </Window.Resources>
+
+  <Border Background="#F015131C" BorderBrush="#574E68" BorderThickness="1" CornerRadius="14" SnapsToDevicePixels="True">
+    <Border.Effect><DropShadowEffect BlurRadius="30" ShadowDepth="8" Opacity="0.55" Color="#AA000000"/></Border.Effect>
+    <Grid>
+      <Grid.RowDefinitions><RowDefinition Height="52"/><RowDefinition Height="*"/><RowDefinition Height="66"/></Grid.RowDefinitions>
+
+      <Border Grid.Row="0" Background="#C9211E2C" CornerRadius="14,14,0,0" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+        <Grid Margin="16,0,10,0">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+            <Border Width="26" Height="26" CornerRadius="7" Background="#BD93F9" Margin="0,0,10,0"><TextBlock Text="S" Foreground="#17131F" FontWeight="Bold" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+            <StackPanel>
+              <TextBlock Text="SONAR MINI MIXER" Foreground="{StaticResource TextBrush}" FontSize="13" FontWeight="SemiBold"/>
+              <StackPanel Orientation="Horizontal">
+                <Ellipse Width="7" Height="7" Fill="{Binding Connected, Converter={StaticResource ConnectionBrushConverter}}" Margin="0,1,6,0"/>
+                <TextBlock Text="{Binding Status}" Foreground="{StaticResource MutedTextBrush}" FontSize="11" ToolTip="{Binding StatusDetail}"/>
+              </StackPanel>
+            </StackPanel>
+          </StackPanel>
+          <Border Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Background="#262231" CornerRadius="8" Padding="12,6">
+            <TextBlock Text="{Binding StatusDetail}" Foreground="#A9A1B5" FontSize="11" TextTrimming="CharacterEllipsis" MaxWidth="280"/>
+          </Border>
+          <StackPanel Grid.Column="2" Orientation="Horizontal">
+            <Button x:Name="PinButton" Style="{StaticResource ChromeButton}" Content="◇" Click="Pin_Click" ToolTip="Pin and keep open" AutomationProperties.Name="Pin mixer"/>
+            <Button Style="{StaticResource ChromeButton}" Content="⚙" Click="Settings_Click" ToolTip="Settings" AutomationProperties.Name="Settings"/>
+            <Button Style="{StaticResource ChromeButton}" Content="×" Click="Hide_Click" ToolTip="Hide mixer" AutomationProperties.Name="Hide mixer"/>
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <ItemsControl Grid.Row="1" ItemsSource="{Binding Channels}" IsEnabled="{Binding CanControl}" Margin="14,10,14,4">
+        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Rows="1"/></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate><DataTemplate>
+          <Border BorderBrush="#302B3B" BorderThickness="0,0,1,0" Margin="2,0">
+            <StackPanel HorizontalAlignment="Center">
+              <TextBlock Text="{Binding Name}" Foreground="{Binding Accent}" FontSize="11" FontWeight="SemiBold" TextOptions.TextFormattingMode="Display" HorizontalAlignment="Center"/>
+              <Slider Style="{StaticResource VerticalFader}" Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" AutomationProperties.Name="{Binding Name}"/>
+              <TextBlock Text="{Binding VolumeText, StringFormat={}{0}%}" Foreground="{StaticResource TextBrush}" FontSize="12" FontWeight="SemiBold" FontFamily="Consolas" HorizontalAlignment="Center"/>
+              <Button Style="{StaticResource MuteButton}" Content="{Binding MuteGlyph}" Click="Mute_Click" ToolTip="Mute or unmute" AutomationProperties.Name="Mute channel"/>
+            </StackPanel>
+          </Border>
+        </DataTemplate></ItemsControl.ItemTemplate>
+      </ItemsControl>
+
+      <Border Grid.Row="2" Background="#B91D1A26" CornerRadius="0,0,14,14" BorderBrush="#332E40" BorderThickness="0,1,0,0">
+        <Grid Margin="18,7,18,8">
+          <Grid.ColumnDefinitions><ColumnDefinition Width="82"/><ColumnDefinition Width="*"/><ColumnDefinition Width="54"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+          <StackPanel VerticalAlignment="Center"><TextBlock Text="CHATMIX" Foreground="#FFB86C" FontWeight="SemiBold" FontSize="11"/><TextBlock Text="GAME  ←  →  CHAT" Foreground="#777082" FontSize="9" Margin="0,3,0,0"/></StackPanel>
+          <Slider Grid.Column="1" Minimum="-100" Maximum="100" Value="{Binding ChatMix, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsMoveToPointEnabled="True" IsEnabled="{Binding CanControl}" Margin="12,0" VerticalAlignment="Center" AutomationProperties.Name="Game and chat balance"/>
+          <TextBlock Grid.Column="2" Text="{Binding ChatMix, StringFormat={}{0:0}}" Foreground="{StaticResource TextBrush}" FontFamily="Consolas" FontSize="12" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+          <Button Grid.Column="3" Content="CENTER" Click="CenterChatMix_Click" Padding="10,5" Background="#2B2737" Foreground="#CFC8DA" BorderBrush="#443D52" Cursor="Hand" ToolTip="Reset ChatMix to center"/>
+        </Grid>
+      </Border>
+    </Grid>
+  </Border>
+</Window>

@@ -1,0 +1,84 @@
+using System.Globalization;
+
+namespace SonarMiniMixer.Core;
+
+public sealed class SonarClient : ISonarClient, IDisposable
+{
+    private readonly ISonarEndpointProvider _endpoints;
+    private readonly HttpClient _http;
+
+    public SonarClient(ISonarEndpointProvider endpoints, HttpMessageHandler? handler = null)
+    {
+        _endpoints = endpoints;
+        _http = handler is null ? new HttpClient() : new HttpClient(handler);
+        _http.Timeout = TimeSpan.FromSeconds(4);
+    }
+
+    public Task<MixerState> GetStateAsync(CancellationToken cancellationToken = default) =>
+        ExecuteAsync(async baseUri =>
+        {
+            var volumes = GetStringAsync(baseUri, "volumeSettings/classic", cancellationToken);
+            var chatMix = GetStringAsync(baseUri, "chatMix", cancellationToken);
+            var mode = GetStringAsync(baseUri, "mode/", cancellationToken);
+            await Task.WhenAll(volumes, chatMix, mode);
+            return SonarStateParser.Parse(await volumes, await chatMix, await mode);
+        }, cancellationToken);
+
+    public Task SetVolumeAsync(string channel, double volume, CancellationToken cancellationToken = default)
+    {
+        if (volume is < 0 or > 1) throw new ArgumentOutOfRangeException(nameof(volume));
+        ValidateChannel(channel);
+        return PutAsync($"volumeSettings/classic/{channel}/Volume/{volume.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
+    }
+
+    public Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default)
+    {
+        ValidateChannel(channel);
+        return PutAsync($"volumeSettings/classic/{channel}/Mute/{muted.ToString().ToLowerInvariant()}", cancellationToken);
+    }
+
+    public Task SetChatMixAsync(double balance, CancellationToken cancellationToken = default)
+    {
+        if (balance is < -1 or > 1) throw new ArgumentOutOfRangeException(nameof(balance));
+        return PutAsync($"chatMix?balance={balance.ToString("0.####", CultureInfo.InvariantCulture)}", cancellationToken);
+    }
+
+    private Task PutAsync(string relativeUri, CancellationToken cancellationToken) =>
+        ExecuteAsync(async baseUri =>
+        {
+            using var response = await _http.PutAsync(new Uri(baseUri, relativeUri), new ByteArrayContent([]), cancellationToken);
+            response.EnsureSuccessStatusCode();
+            return true;
+        }, cancellationToken);
+
+    private async Task<string> GetStringAsync(Uri baseUri, string relativeUri, CancellationToken cancellationToken)
+    {
+        using var response = await _http.GetAsync(new Uri(baseUri, relativeUri), cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsStringAsync(cancellationToken);
+    }
+
+    private async Task<T> ExecuteAsync<T>(Func<Uri, Task<T>> operation, CancellationToken cancellationToken)
+    {
+        Exception? firstFailure = null;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            try { return await operation(await _endpoints.GetAsync(cancellationToken)); }
+            catch (Exception exception) when (
+                exception is HttpRequestException or TaskCanceledException &&
+                !cancellationToken.IsCancellationRequested)
+            {
+                firstFailure ??= exception;
+                _endpoints.Invalidate();
+            }
+        }
+        throw new SonarConnectionException("Could not connect to SteelSeries Sonar. Make sure GG and Sonar are running.", firstFailure);
+    }
+
+    private static void ValidateChannel(string channel)
+    {
+        if (!SonarStateParser.IsSafeChannel(channel)) throw new ArgumentException("Unsafe Sonar channel id.", nameof(channel));
+    }
+
+    public void Dispose() => _http.Dispose();
+}
