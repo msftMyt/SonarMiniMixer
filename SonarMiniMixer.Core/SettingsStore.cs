@@ -49,6 +49,6 @@ public sealed class SettingsStore
     private static AppSettings Sanitize(AppSettings value) => value with
     {
         Width = Math.Clamp(value.Width, 620, 1100),
-        Height = Math.Clamp(value.Height, 300, 650)
+        Height = Math.Clamp(value.Height, 330, 650)
     };
 }

@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Interop;
 using SonarMiniMixer.Core;
 
 namespace SonarMiniMixer.App;
@@ -15,6 +16,7 @@ public partial class MainWindow : Window
     private AppSettings _settings = AppSettings.Default;
     private bool _pinned;
     private bool _allowClose;
+    private bool _loaded;
 
     public MainWindow(MixerViewModel viewModel, SettingsStore settingsStore)
     {
@@ -28,6 +30,7 @@ public partial class MainWindow : Window
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        _loaded = true;
         _settings = await _settingsStore.LoadAsync();
         Width = _settings.Width;
         Height = _settings.Height;
@@ -36,6 +39,7 @@ public partial class MainWindow : Window
         {
             Left = left;
             Top = top;
+            ClampToVisibleWorkArea();
         }
         else PositionNearTaskbar();
         await _viewModel.StartAsync();
@@ -43,9 +47,11 @@ public partial class MainWindow : Window
 
     public void ShowFromTray()
     {
-        if (!_pinned) PositionNearTaskbar();
         Topmost = true;
         Show();
+        if (!_loaded) return;
+        if (!_pinned) PositionNearTaskbar();
+        else ClampToVisibleWorkArea();
         Activate();
         Focus();
     }
@@ -66,14 +72,36 @@ public partial class MainWindow : Window
     {
         var cursor = System.Windows.Forms.Cursor.Position;
         var screen = System.Windows.Forms.Screen.FromPoint(cursor);
-        var source = PresentationSource.FromVisual(this);
-        var fromPixels = source?.CompositionTarget?.TransformFromDevice ?? Matrix.Identity;
+        var fromPixels = GetTransformFromPixels();
         var topLeft = fromPixels.Transform(new System.Windows.Point(screen.WorkingArea.Left, screen.WorkingArea.Top));
         var bottomRight = fromPixels.Transform(new System.Windows.Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom));
         var width = ActualWidth > 0 ? ActualWidth : Width;
         var height = ActualHeight > 0 ? ActualHeight : Height;
         Left = Math.Clamp(bottomRight.X - width - 14, topLeft.X + 12, Math.Max(topLeft.X + 12, bottomRight.X - width - 12));
         Top = Math.Clamp(bottomRight.Y - height - 14, topLeft.Y + 12, Math.Max(topLeft.Y + 12, bottomRight.Y - height - 12));
+    }
+
+    private Matrix GetTransformFromPixels()
+    {
+        var source = PresentationSource.FromVisual(this);
+        if (source?.CompositionTarget is not null) return source.CompositionTarget.TransformFromDevice;
+        using var graphics = System.Drawing.Graphics.FromHwnd(IntPtr.Zero);
+        return new Matrix(96.0 / graphics.DpiX, 0, 0, 96.0 / graphics.DpiY, 0, 0);
+    }
+
+    private void ClampToVisibleWorkArea()
+    {
+        var hwnd = new WindowInteropHelper(this).Handle;
+        var screen = hwnd != IntPtr.Zero
+            ? System.Windows.Forms.Screen.FromHandle(hwnd)
+            : System.Windows.Forms.Screen.FromPoint(System.Windows.Forms.Cursor.Position);
+        var fromPixels = GetTransformFromPixels();
+        var topLeft = fromPixels.Transform(new System.Windows.Point(screen.WorkingArea.Left, screen.WorkingArea.Top));
+        var bottomRight = fromPixels.Transform(new System.Windows.Point(screen.WorkingArea.Right, screen.WorkingArea.Bottom));
+        var width = ActualWidth > 0 ? ActualWidth : Width;
+        var height = ActualHeight > 0 ? ActualHeight : Height;
+        Left = Math.Clamp(Left, topLeft.X + 12, Math.Max(topLeft.X + 12, bottomRight.X - width - 12));
+        Top = Math.Clamp(Top, topLeft.Y + 12, Math.Max(topLeft.Y + 12, bottomRight.Y - height - 12));
     }
 
     private async void Pin_Click(object sender, RoutedEventArgs e) => await SetPinnedAsync(!_pinned);
@@ -92,6 +120,7 @@ public partial class MainWindow : Window
         ShowInTaskbar = value;
         PinButton.Content = value ? "◆" : "◇";
         PinButton.ToolTip = value ? "Unpin and auto-hide" : "Pin and keep open";
+        System.Windows.Automation.AutomationProperties.SetName(PinButton, value ? "Unpin mixer" : "Pin mixer");
         if (reposition && !value) PositionNearTaskbar();
     }
 

@@ -164,8 +164,18 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
         }
     }
     public string VolumeText => $"{Math.Round(Volume):0}";
-    public bool Muted { get => _muted; set { if (Set(ref _muted, value)) OnPropertyChanged(nameof(MuteGlyph)); } }
+    public bool Muted
+    {
+        get => _muted;
+        set
+        {
+            if (!Set(ref _muted, value)) return;
+            OnPropertyChanged(nameof(MuteGlyph));
+            OnPropertyChanged(nameof(MuteAction));
+        }
+    }
     public string MuteGlyph => Muted ? "×" : "◖";
+    public string MuteAction => $"{(Muted ? "Unmute" : "Mute")} {Name}";
 
     internal ChannelViewModel(MixerChannel source, MixerViewModel owner)
     {
@@ -179,7 +189,7 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
         _volumeDebounce?.Dispose();
         _volumeDebounce = null;
         _volume = source.Volume * 100; _muted = source.Muted;
-        OnPropertyChanged(nameof(Volume)); OnPropertyChanged(nameof(VolumeText)); OnPropertyChanged(nameof(Muted)); OnPropertyChanged(nameof(MuteGlyph));
+        OnPropertyChanged(nameof(Volume)); OnPropertyChanged(nameof(VolumeText)); OnPropertyChanged(nameof(Muted)); OnPropertyChanged(nameof(MuteGlyph)); OnPropertyChanged(nameof(MuteAction));
     }
 
     public Task ToggleMuteAsync() => _owner.ToggleMuteAsync(this);
