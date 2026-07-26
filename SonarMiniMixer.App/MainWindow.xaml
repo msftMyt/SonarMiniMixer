@@ -30,10 +30,19 @@
                     BorderThickness="{TemplateBinding BorderThickness}">
               <Viewbox Width="16" Height="16" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Grid Width="18" Height="18">
-                  <Path Data="M2,7 L6,7 L10,3 L10,15 L6,11 L2,11 Z" Fill="{TemplateBinding Foreground}"/>
-                  <Path x:Name="SoundWaves" Data="M12,6 C14,8 14,10 12,12 M14,4 C17,7 17,11 14,14"
-                        Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6"
-                        StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                  <Grid x:Name="SpeakerIcon">
+                    <Path Data="M2,7 L6,7 L10,3 L10,15 L6,11 L2,11 Z" Fill="{TemplateBinding Foreground}"/>
+                    <Path x:Name="SoundWaves" Data="M12,6 C14,8 14,10 12,12 M14,4 C17,7 17,11 14,14"
+                          Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                  </Grid>
+                  <Grid x:Name="MicIcon" Visibility="Collapsed">
+                    <Path Data="M9,2 C10.4,2 11.5,3.1 11.5,4.5 L11.5,9 C11.5,10.4 10.4,11.5 9,11.5 C7.6,11.5 6.5,10.4 6.5,9 L6.5,4.5 C6.5,3.1 7.6,2 9,2 Z"
+                          Fill="{TemplateBinding Foreground}"/>
+                    <Path x:Name="MicStand" Data="M4.6,8.6 C4.6,13 13.4,13 13.4,8.6 M9,13.4 L9,16 M6.4,16 L11.6,16"
+                          Stroke="{TemplateBinding Foreground}" StrokeThickness="1.6"
+                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
+                  </Grid>
                   <Path x:Name="MuteSlash" Data="M3,3 L15,15" Stroke="{TemplateBinding Foreground}"
                         StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
                         Visibility="Collapsed"/>
@@ -41,6 +50,10 @@
               </Viewbox>
             </Border>
             <ControlTemplate.Triggers>
+              <DataTrigger Binding="{Binding IsMicrophone}" Value="True">
+                <Setter TargetName="SpeakerIcon" Property="Visibility" Value="Collapsed"/>
+                <Setter TargetName="MicIcon" Property="Visibility" Value="Visible"/>
+              </DataTrigger>
               <Trigger Property="IsMouseOver" Value="True">
                 <Setter TargetName="MuteChrome" Property="Background" Value="{StaticResource HoverBrush}"/>
                 <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
@@ -50,6 +63,7 @@
               </Trigger>
               <Trigger Property="IsChecked" Value="True">
                 <Setter TargetName="SoundWaves" Property="Visibility" Value="Collapsed"/>
+                <Setter TargetName="MicStand" Property="Visibility" Value="Collapsed"/>
                 <Setter TargetName="MuteSlash" Property="Visibility" Value="Visible"/>
                 <Setter Property="Foreground" Value="White"/>
                 <Setter TargetName="MuteChrome" Property="Background" Value="{StaticResource DangerBrush}"/>

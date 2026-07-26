@@ -2,6 +2,12 @@
 
 All notable changes to Sonar Mini Mixer are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- The **Mic channel's mute button now uses a microphone icon** instead of a speaker, so muting your voice reads differently from muting a playback channel. Muted state slashes the mic the same way it slashes a speaker.
+
 ## [1.1.0] - 2026-07-25
 
 ### Added

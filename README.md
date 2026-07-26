@@ -92,7 +92,7 @@ dotnet build .\SonarMiniMixer.slnx -c Release
 5. Choose an **EQ** preset above Game, Chat, Media, Aux, or Mic.
 6. Choose each channel's physical **OUT** device—or the Mic **IN** device—below its mute button.
 7. Use the Master **ALL** selector to send Game, Chat, Media, and Aux to one output at once; Mic is never changed.
-8. Click the speaker button below a fader to mute or unmute it.
+8. Click the button below a fader to mute or unmute it — playback channels show a speaker, Mic shows a microphone.
 9. Use **ChatMix** to favor Game or Chat; click **Reset** or press `Ctrl+0` to center it.
 
 ### Window and tray controls

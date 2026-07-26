@@ -28,6 +28,7 @@ internal static class Program
             ("fader exposes a wide hit target without unnamed automation controls", FaderHitTargetAndAutomationAsync),
             ("mute controls expose toggle semantics and checked state", MuteToggleSemanticsAsync),
             ("mute controls render speaker and speaker-off icons", MuteIconographyAsync),
+            ("mic channel mutes with a microphone icon, not a speaker", MicrophoneMuteIconographyAsync),
             ("fader renders a groove with an accent level fill", FaderGrooveAndLevelFillAsync),
             ("responsive metrics scale between min, reference, and max", ResponsiveMetricScalingAsync),
             ("layout grows and shrinks without clipping", LayoutAdaptsToWindowSizeAsync),
@@ -112,6 +113,46 @@ internal static class Program
         Equal(Visibility.Collapsed, soundWaves.Visibility);
         Equal(Visibility.Visible, muteSlash.Visibility);
         return Task.CompletedTask;
+    }
+
+    private static async Task MicrophoneMuteIconographyAsync()
+    {
+        using var fixture = new WindowFixture();
+        var client = new FakeSonarClient(State());
+        using var viewModel = new MixerViewModel(client);
+        await viewModel.RefreshAsync();
+
+        var mic = viewModel.Channels.Single(channel => channel.Id == "chatCapture");
+        var game = viewModel.Channels.Single(channel => channel.Id == "game");
+        Equal(true, mic.IsMicrophone);
+        Equal(false, game.IsMicrophone);
+
+        var micButton = Render(fixture.MuteStyle, mic);
+        var gameButton = Render(fixture.MuteStyle, game);
+
+        Equal(Visibility.Visible, Part<Grid>(micButton, "MicIcon").Visibility);
+        Equal(Visibility.Collapsed, Part<Grid>(micButton, "SpeakerIcon").Visibility);
+        Equal(Visibility.Collapsed, Part<Grid>(gameButton, "MicIcon").Visibility);
+        Equal(Visibility.Visible, Part<Grid>(gameButton, "SpeakerIcon").Visibility);
+
+        micButton.IsChecked = true;
+        micButton.UpdateLayout();
+        Equal(Visibility.Visible, Part<Grid>(micButton, "MicIcon").Visibility);
+        Equal(Visibility.Collapsed, Part<ShapePath>(micButton, "MicStand").Visibility);
+        Equal(Visibility.Visible, Part<ShapePath>(micButton, "MuteSlash").Visibility);
+
+        static ToggleButton Render(Style style, object dataContext)
+        {
+            var button = new ToggleButton { Style = style, IsChecked = false, DataContext = dataContext };
+            button.Measure(new Size(30, 30));
+            button.Arrange(new Rect(0, 0, 30, 30));
+            button.ApplyTemplate();
+            button.UpdateLayout();
+            return button;
+        }
+
+        static T Part<T>(ToggleButton button, string name) where T : FrameworkElement =>
+            (T)button.Template.FindName(name, button)!;
     }
 
     private static Task ResponsiveMetricScalingAsync()

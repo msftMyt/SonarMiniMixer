@@ -271,6 +271,7 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
     public string Name { get; }
     public string Accent { get; }
     public bool IsMaster => Id.Equals("master", StringComparison.OrdinalIgnoreCase);
+    public bool IsMicrophone => Id.Equals("chatCapture", StringComparison.OrdinalIgnoreCase);
     public bool HasChannelOptions => !IsMaster;
     public string DeviceRoleLabel => Id.Equals("chatCapture", StringComparison.OrdinalIgnoreCase) ? "IN" : "OUT";
     public ObservableCollection<SonarPreset> Presets { get; } = [];
