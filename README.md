@@ -87,7 +87,7 @@ dotnet build .\SonarMiniMixer.slnx -c Release
 
 1. Start SteelSeries GG and confirm Sonar is enabled.
 2. Launch **Sonar Mini Mixer**.
-3. Click its purple icon in the Windows notification area.
+3. Click its fader icon in the Windows notification area.
 4. Drag a fader, scroll over it, or use the arrow keys while it is focused.
 5. Choose an **EQ** preset above Game, Chat, Media, Aux, or Mic.
 6. Choose each channel's physical **OUT** device—or the Mic **IN** device—below its mute button.

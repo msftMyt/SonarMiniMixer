@@ -7,7 +7,7 @@ A tiny native Windows tray controller for the existing SteelSeries Sonar mixer, 
 The application runs as a single-instance notification-area utility. Clicking its tray icon opens a compact borderless popup above the taskbar (default 864 x 424, resizable between 640 x 372 and 1180 x 650). The popup dismisses on deactivation unless pinned. Pinning makes the window movable/resizable and keeps it above normal windows. The app never processes audio or installs devices.
 
 ## UI
-- Header: product name, live connection status, pin, settings, and close buttons.
+- Header: product mark, name, live connection status, pin, settings, and close buttons. The header uses the tile-free `AppMark`; the windowed/tray/Start Menu identity uses the tiled `AppIcon`.
 - Mixer: Master, Game, Chat, Media, Aux, and Mic vertical faders with distinct accents, percentage labels, and mute buttons.
 - Per channel: an EQ preset selector above the fader and a physical device selector (OUT for playback, IN for Mic) below the mute button.
 - Master column: an "all playback outputs" selector that fans Game, Chat, Media, and Aux to one device without touching Mic.

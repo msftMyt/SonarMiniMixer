@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-labelledby="title description">
+  <title id="title">Sonar Mini Mixer mark</title>
+  <desc id="description">Three channel faders with colored level fills, drawn without a tile for use on dark surfaces.</desc>
+
+  <g stroke-linecap="round" stroke-width="22" fill="none">
+    <line x1="54" y1="44" x2="54" y2="212" stroke="#3A2F48"/>
+    <line x1="128" y1="44" x2="128" y2="212" stroke="#3A2F48"/>
+    <line x1="202" y1="44" x2="202" y2="212" stroke="#3A2F48"/>
+    <line x1="54" y1="212" x2="54" y2="120" stroke="#48F27A"/>
+    <line x1="128" y1="212" x2="128" y2="78" stroke="#43B4FF"/>
+    <line x1="202" y1="212" x2="202" y2="158" stroke="#FFB020"/>
+  </g>
+
+  <g fill="#F2E8FF">
+    <rect x="26" y="108" width="56" height="22" rx="11"/>
+    <rect x="100" y="66" width="56" height="22" rx="11"/>
+    <rect x="174" y="146" width="56" height="22" rx="11"/>
+  </g>
+</svg>

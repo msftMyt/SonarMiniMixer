@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render SonarMiniMixer's source SVG into application PNG and multi-frame ICO assets."""
+"""Render SonarMiniMixer's source SVGs into application PNG, ICO, and in-app mark assets."""
 
 from __future__ import annotations
 
@@ -15,12 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SVG = ROOT / "SonarMiniMixer.App" / "Assets" / "AppIcon.svg"
 PNG = ROOT / "SonarMiniMixer.App" / "Assets" / "AppIcon.png"
 ICO = ROOT / "SonarMiniMixer.App" / "Assets" / "AppIcon.ico"
+MARK_SVG = ROOT / "SonarMiniMixer.App" / "Assets" / "AppMark.svg"
+MARK_PNG = ROOT / "SonarMiniMixer.App" / "Assets" / "AppMark.png"
 
 
-def render_png(size: int) -> bytes:
+def render_png(size: int, source: Path = SVG) -> bytes:
     output = io.BytesIO()
     cairosvg.svg2png(
-        url=str(SVG),
+        url=str(source),
         write_to=output,
         output_width=size,
         output_height=size,
@@ -59,6 +61,7 @@ def main() -> None:
     images = [(size, render_png(size)) for size in SIZES]
     PNG.write_bytes(images[-1][1])
     write_ico(images)
+    MARK_PNG.write_bytes(render_png(256, MARK_SVG))
 
     with Image.open(ICO) as icon:
         embedded_sizes = sorted(size[0] for size in icon.info.get("sizes", set()))
@@ -67,6 +70,7 @@ def main() -> None:
 
     print(f"Wrote {PNG.relative_to(ROOT)} (256x256)")
     print(f"Wrote {ICO.relative_to(ROOT)} ({', '.join(map(str, embedded_sizes))} px)")
+    print(f"Wrote {MARK_PNG.relative_to(ROOT)} (256x256, tile-free in-app mark)")
 
 
 if __name__ == "__main__":

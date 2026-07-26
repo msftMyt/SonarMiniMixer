@@ -340,7 +340,7 @@
         <Grid Margin="13,0,7,0">
           <Grid.ColumnDefinitions><ColumnDefinition Width="Auto"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
           <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-            <Image Width="24" Height="24" Source="Assets/AppIcon.png" Margin="0,0,9,0" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/>
+            <Image Width="24" Height="24" Source="Assets/AppMark.png" Margin="0,0,9,0" RenderOptions.BitmapScalingMode="HighQuality" SnapsToDevicePixels="True"/>
             <TextBlock Text="Sonar Mini Mixer" Foreground="{StaticResource TextBrush}" FontFamily="Segoe UI Variable Display, Segoe UI"
                        FontSize="12.5" FontWeight="SemiBold" VerticalAlignment="Center"/>
             <Ellipse Width="6" Height="6" Fill="{Binding Connected, Converter={StaticResource ConnectionBrushConverter}}" Margin="9,1,0,0" VerticalAlignment="Center"/>
