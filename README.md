@@ -24,6 +24,9 @@ SteelSeries Sonar is powerful, but changing one volume level normally means reop
 
 - **Six live channels** — Master, Game, Chat, Media, Aux, and Mic
 - **Volume and mute** for every channel
+- **Per-channel EQ presets** for Game, Chat, Media, Aux, and Mic
+- **Independent physical routing** for each playback channel and microphone
+- **Master quick output** to route Game, Chat, Media, and Aux together
 - **Game / Chat balance** with one-click centering
 - **Tray popup** that disappears when you are done
 - **Pinned mode** for a movable, resizable, always-on-top mixer
@@ -76,8 +79,11 @@ dotnet build .\SonarMiniMixer.slnx -c Release
 2. Launch **Sonar Mini Mixer**.
 3. Click its purple icon in the Windows notification area.
 4. Drag a fader, scroll over it, or use the arrow keys while it is focused.
-5. Click the button below a channel to mute or unmute it.
-6. Use **ChatMix** to favor Game or Chat; click **Center** or press `Ctrl+0` to reset it.
+5. Choose an **EQ** preset above Game, Chat, Media, Aux, or Mic.
+6. Choose each channel's physical **OUT** device—or the Mic **IN** device—below its mute button.
+7. Use the Master **ALL** selector to send Game, Chat, Media, and Aux to one output at once; Mic is never changed.
+8. Click the speaker button below a fader to mute or unmute it.
+9. Use **ChatMix** to favor Game or Chat; click **Reset** or press `Ctrl+0` to center it.
 
 ### Window and tray controls
 
@@ -198,8 +204,11 @@ Do **not** attach `coreProps.json`; it contains local service connection data.
 # Build all projects
 dotnet build .\SonarMiniMixer.slnx -c Release
 
-# Run the test suite
+# Run the core test suite
 dotnet run --project .\SonarMiniMixer.Tests\SonarMiniMixer.Tests.csproj -c Release
+
+# Run the UI/view-model test suite
+dotnet run --project .\SonarMiniMixer.App.Tests\SonarMiniMixer.App.Tests.csproj -c Release
 
 # Create self-contained Windows executables
 .\tools\Build-Release.ps1
@@ -208,7 +217,7 @@ dotnet run --project .\SonarMiniMixer.Tests\SonarMiniMixer.Tests.csproj -c Relea
 .\tools\Install.ps1
 .\tools\QA.ps1
 
-# Regenerate the privacy-safe README screenshot
+# Regenerate the README screenshot (review it for personal device names before committing)
 .\tools\Capture-Screenshot.ps1
 ```
 
@@ -220,6 +229,7 @@ dotnet run --project .\SonarMiniMixer.Tests\SonarMiniMixer.Tests.csproj -c Relea
 | `SonarMiniMixer.Core` | Sonar discovery, parsing, synchronization, settings, and Core Audio integration |
 | `SonarMiniMixer.Cli` | Read-only diagnostics and local app commands |
 | `SonarMiniMixer.Tests` | Dependency-free executable test suite |
+| `SonarMiniMixer.App.Tests` | Dependency-free WPF UI and view-model test suite |
 | `tools` | Build, install, screenshot, icon, and QA automation |
 
 The app uses WPF, the Windows Forms `NotifyIcon`, and [NAudio](https://github.com/naudio/NAudio) for Windows Core Audio endpoint control.

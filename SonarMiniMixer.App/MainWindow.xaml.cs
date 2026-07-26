@@ -143,7 +143,32 @@ public partial class MainWindow : Window
         if ((sender as FrameworkElement)?.DataContext is ChannelViewModel channel) await channel.ToggleMuteAsync();
     }
 
+    private async void Preset_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ComboBox { DataContext: ChannelViewModel channel, SelectedValue: Guid presetId }) return;
+        if (channel.SelectedPresetId != presetId) await _viewModel.SelectPresetAsync(channel, presetId);
+    }
+
+    private async void Device_SelectionChanged(object sender, System.Windows.Controls.SelectionChangedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.ComboBox { DataContext: ChannelViewModel channel, SelectedValue: string deviceId }) return;
+        if (string.Equals(channel.SelectedDeviceId, deviceId, StringComparison.OrdinalIgnoreCase)) return;
+        if (channel.IsMaster) await _viewModel.SelectMasterOutputAsync(channel, deviceId);
+        else await _viewModel.SelectDeviceAsync(channel, deviceId);
+    }
+
     private void CenterChatMix_Click(object sender, RoutedEventArgs e) => _viewModel.ChatMix = 0;
+
+    private void Slider_PreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Slider slider || !slider.IsEnabled || e.Delta == 0) return;
+        slider.Value = Math.Clamp(
+            slider.Value + (Math.Sign(e.Delta) * slider.SmallChange),
+            slider.Minimum,
+            slider.Maximum);
+        e.Handled = true;
+    }
+
     private void Settings_Click(object sender, RoutedEventArgs e) => new SettingsWindow { Owner = this }.ShowDialog();
     private void Hide_Click(object sender, RoutedEventArgs e) => Hide();
 
@@ -181,4 +206,56 @@ public sealed class ConnectionBrushConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture) =>
         new SolidColorBrush(value is true ? System.Windows.Media.Color.FromRgb(80, 250, 123) : System.Windows.Media.Color.FromRgb(255, 184, 108));
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) => System.Windows.Data.Binding.DoNothing;
+}
+
+public sealed class LevelFillHeightConverter : IMultiValueConverter
+{
+    public object Convert(object[] values, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (values.Length < 4 ||
+            values[0] is not double value || values[1] is not double minimum ||
+            values[2] is not double maximum || values[3] is not double trackHeight ||
+            maximum <= minimum || double.IsNaN(trackHeight)) return 0d;
+        var fraction = Math.Clamp((value - minimum) / (maximum - minimum), 0, 1);
+        return Math.Max(0, trackHeight * fraction);
+    }
+
+    public object[] ConvertBack(object value, Type[] targetTypes, object parameter, CultureInfo culture) =>
+        throw new NotSupportedException();
+}
+
+/// <summary>
+/// Scales a metric with the window so extra room is actually used and a shrunk
+/// window stays legible. Parameter is "atMin,atReference,atMax".
+/// </summary>
+public sealed class ResponsiveMetricConverter : IValueConverter
+{
+    public const double MinHeight = 372;
+    public const double ReferenceHeight = 424;
+    public const double MaxHeight = 650;
+
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is not double actual || double.IsNaN(actual) ||
+            parameter is not string spec) return DependencyProperty.UnsetValue;
+        var parts = spec.Split(',');
+        if (parts.Length != 3 ||
+            !double.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out var atMin) ||
+            !double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out var atRef) ||
+            !double.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out var atMax))
+            return DependencyProperty.UnsetValue;
+
+        var height = Math.Clamp(actual, MinHeight, MaxHeight);
+        return height <= ReferenceHeight
+            ? Lerp(atMin, atRef, Fraction(height, MinHeight, ReferenceHeight))
+            : Lerp(atRef, atMax, Fraction(height, ReferenceHeight, MaxHeight));
+    }
+
+    private static double Fraction(double value, double from, double to) =>
+        to <= from ? 1 : Math.Clamp((value - from) / (to - from), 0, 1);
+
+    private static double Lerp(double from, double to, double t) => from + ((to - from) * t);
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>
+        System.Windows.Data.Binding.DoNothing;
 }

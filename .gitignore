@@ -17,3 +17,5 @@ artifacts/
 *.cer
 *.crt
 settings.json
+
+docs/designs/sonar-mini-mixer-concepts/

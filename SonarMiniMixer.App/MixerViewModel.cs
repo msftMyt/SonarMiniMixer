@@ -8,6 +8,7 @@ namespace SonarMiniMixer.App;
 
 public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
 {
+    private static readonly string[] PlaybackOutputChannels = ["game", "chatRender", "media", "aux"];
     private readonly ISonarClient _client;
     private readonly DispatcherTimer _pollTimer;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
@@ -19,6 +20,7 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     private bool _canControlChatMix;
     private double _chatMix;
     private CancellationTokenSource? _chatMixDebounce;
+    private DateTimeOffset _nextOptionsRefresh;
 
     public ObservableCollection<ChannelViewModel> Channels { get; } = [];
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -38,9 +40,9 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
             }
             if (!CanControlChatMix || !Set(ref _chatMix, value)) return;
             _chatMixDebounce?.Cancel();
-            _chatMixDebounce?.Dispose();
-            _chatMixDebounce = new CancellationTokenSource();
-            _ = DebounceChatMixAsync(value, _chatMixDebounce.Token);
+            var debounce = new CancellationTokenSource();
+            _chatMixDebounce = debounce;
+            _ = DebounceChatMixAsync(value, debounce);
         }
     }
 
@@ -82,12 +84,18 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
                     Channels.RemoveAt(i);
                 }
             }
-            ChatMix = state.ChatMix * 100;
+            if (_chatMixDebounce is null) ChatMix = state.ChatMix * 100;
             CanControl = state.CanControl;
             CanControlChatMix = state.CanControlChatMix;
             Connected = true;
             Status = state.CanControl ? "Sonar connected" : $"{state.Mode} mode";
             StatusDetail = state.CanControl ? "Live · Classic mixer" : "Switch Sonar to Classic mode to make changes";
+            if (state.CanControl && DateTimeOffset.UtcNow >= _nextOptionsRefresh)
+            {
+                _nextOptionsRefresh = DateTimeOffset.UtcNow.AddSeconds(30);
+                try { await RefreshChannelOptionsAsync(); }
+                catch { StatusDetail = "Live · presets and routing options unavailable"; }
+            }
         }
         catch (Exception exception)
         {
@@ -100,11 +108,10 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         finally { _isApplyingState = false; _refreshGate.Release(); }
     }
 
-    internal async Task SetVolumeAsync(ChannelViewModel channel, double percent)
+    internal Task SetVolumeAsync(ChannelViewModel channel, double percent)
     {
-        if (!CanControl) return;
-        try { await _client.SetVolumeAsync(channel.Id, Math.Clamp(percent / 100, 0, 1)); }
-        catch { await RefreshAsync(); }
+        if (!CanControl) throw new SonarConnectionException("Sonar is not accepting Classic mixer changes.");
+        return _client.SetVolumeAsync(channel.Id, Math.Clamp(percent / 100, 0, 1));
     }
 
     internal async Task ToggleMuteAsync(ChannelViewModel channel)
@@ -113,18 +120,123 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         var target = !channel.Muted;
         channel.Muted = target;
         try { await _client.SetMuteAsync(channel.Id, target); }
-        catch { await RefreshAsync(); }
+        catch { await RecoverFromWriteFailureAsync($"{channel.Name} mute"); }
     }
 
-    private async Task DebounceChatMixAsync(double percent, CancellationToken token)
+    public async Task SelectPresetAsync(ChannelViewModel channel, Guid presetId)
     {
+        if (!CanControl || !channel.HasChannelOptions || channel.SelectedPresetId == presetId) return;
         try
         {
-            await Task.Delay(90, token);
-            await _client.SetChatMixAsync(Math.Clamp(percent / 100, -1, 1), token);
+            await _client.SelectPresetAsync(channel.Id, presetId);
+            channel.SetSelectedPreset(presetId);
+            StatusDetail = $"{channel.Name} preset updated";
+        }
+        catch { await RecoverFromWriteFailureAsync($"{channel.Name} preset"); }
+    }
+
+    public async Task SelectDeviceAsync(ChannelViewModel channel, string deviceId)
+    {
+        if (!CanControl || !channel.HasChannelOptions || channel.SelectedDeviceId == deviceId) return;
+        try
+        {
+            await _client.SetChannelDeviceAsync(channel.Id, deviceId);
+            channel.SetSelectedDevice(deviceId);
+            RefreshMasterOutputSelection();
+            StatusDetail = $"{channel.Name} device updated";
+        }
+        catch { await RecoverFromWriteFailureAsync($"{channel.Name} device"); }
+    }
+
+    public async Task SelectMasterOutputAsync(ChannelViewModel master, string deviceId)
+    {
+        if (!CanControl || !master.IsMaster || !master.Devices.Any(device =>
+                string.Equals(device.Id, deviceId, StringComparison.OrdinalIgnoreCase))) return;
+
+        var failures = new List<string>();
+        foreach (var channelId in PlaybackOutputChannels)
+        {
+            var channel = Channels.FirstOrDefault(candidate => candidate.Id == channelId);
+            if (channel is null || string.Equals(channel.SelectedDeviceId, deviceId, StringComparison.OrdinalIgnoreCase)) continue;
+            try
+            {
+                await _client.SetChannelDeviceAsync(channel.Id, deviceId);
+                channel.SetSelectedDevice(deviceId);
+            }
+            catch { failures.Add(channel.Name); }
+        }
+
+        RefreshMasterOutputSelection();
+        if (failures.Count == 0)
+        {
+            var deviceName = master.Devices.First(device =>
+                string.Equals(device.Id, deviceId, StringComparison.OrdinalIgnoreCase)).Name;
+            StatusDetail = $"Playback outputs changed to {deviceName}";
+            return;
+        }
+
+        Status = "Output partially updated";
+        StatusDetail = $"Could not update {string.Join(", ", failures)}. Other playback channels were changed.";
+    }
+
+    private async Task RefreshChannelOptionsAsync()
+    {
+        var channels = Channels.Where(channel => channel.HasChannelOptions).ToArray();
+        var routingTask = _client.GetDeviceRoutingAsync();
+        var presetTasks = channels.ToDictionary(channel => channel.Id, channel => _client.GetPresetsAsync(channel.Id));
+        await Task.WhenAll(presetTasks.Values.Append((Task)routingTask));
+        var routing = await routingTask;
+        foreach (var channel in channels)
+        {
+            var devices = channel.Id == "chatCapture" ? routing.MicrophoneDevices : routing.OutputDevices;
+            routing.ChannelDeviceIds.TryGetValue(channel.Id, out var deviceId);
+            channel.ApplyOptions(await presetTasks[channel.Id], devices, deviceId);
+        }
+        var master = Channels.FirstOrDefault(channel => channel.IsMaster);
+        master?.ApplyMasterOutputOptions(routing.OutputDevices);
+        RefreshMasterOutputSelection();
+    }
+
+    private void RefreshMasterOutputSelection()
+    {
+        var master = Channels.FirstOrDefault(channel => channel.IsMaster);
+        if (master is null) return;
+        var selectedIds = PlaybackOutputChannels
+            .Select(channelId => Channels.FirstOrDefault(channel => channel.Id == channelId)?.SelectedDeviceId)
+            .Where(deviceId => deviceId is not null)
+            .ToArray();
+        var selectedId = selectedIds.Length == PlaybackOutputChannels.Length &&
+                         selectedIds.All(deviceId => string.Equals(deviceId, selectedIds[0], StringComparison.OrdinalIgnoreCase))
+            ? selectedIds[0]
+            : null;
+        master.SetSelectedDevice(selectedId);
+    }
+
+    private async Task DebounceChatMixAsync(double percent, CancellationTokenSource debounce)
+    {
+        var failed = false;
+        try
+        {
+            await Task.Delay(90, debounce.Token);
+            if (!CanControlChatMix) throw new SonarConnectionException("ChatMix is not currently available.");
+            await _client.SetChatMixAsync(Math.Clamp(percent / 100, -1, 1), debounce.Token);
         }
         catch (OperationCanceledException) { }
-        catch { await RefreshAsync(); }
+        catch { failed = true; }
+        finally
+        {
+            if (ReferenceEquals(_chatMixDebounce, debounce)) _chatMixDebounce = null;
+            debounce.Dispose();
+        }
+        if (failed) await RecoverFromWriteFailureAsync("ChatMix");
+    }
+
+    internal async Task RecoverFromWriteFailureAsync(string control)
+    {
+        await RefreshAsync();
+        if (!Connected) return;
+        Status = "Change failed";
+        StatusDetail = $"Could not update {control}. Check Sonar and try again.";
     }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -150,22 +262,37 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
     private readonly MixerViewModel _owner;
     private double _volume;
     private bool _muted;
+    private Guid? _selectedPresetId;
+    private string? _selectedDeviceId;
+    private bool _masterOutputOptionsLoaded;
     private CancellationTokenSource? _volumeDebounce;
 
     public string Id { get; }
     public string Name { get; }
     public string Accent { get; }
+    public bool IsMaster => Id.Equals("master", StringComparison.OrdinalIgnoreCase);
+    public bool HasChannelOptions => !IsMaster;
+    public string DeviceRoleLabel => Id.Equals("chatCapture", StringComparison.OrdinalIgnoreCase) ? "IN" : "OUT";
+    public ObservableCollection<SonarPreset> Presets { get; } = [];
+    public ObservableCollection<SonarAudioDevice> Devices { get; } = [];
+    public Guid? SelectedPresetId => _selectedPresetId;
+    public string? SelectedDeviceId => _selectedDeviceId;
+    public string SelectedPresetName => Presets.FirstOrDefault(preset => preset.Id == _selectedPresetId)?.Name ?? "Select EQ";
+    public string SelectedDeviceName => Devices.FirstOrDefault(device =>
+        string.Equals(device.Id, _selectedDeviceId, StringComparison.OrdinalIgnoreCase))?.Name ??
+        (IsMaster && _masterOutputOptionsLoaded ? "Mixed outputs" : IsMaster ? "Quick output" : "Select device");
     public double Volume
     {
         get => _volume;
         set
         {
+            if (!_owner.CanControl) return;
             if (!Set(ref _volume, value)) return;
             OnPropertyChanged(nameof(VolumeText));
             _volumeDebounce?.Cancel();
-            _volumeDebounce?.Dispose();
-            _volumeDebounce = new CancellationTokenSource();
-            _ = DebounceVolumeAsync(value, _volumeDebounce.Token);
+            var debounce = new CancellationTokenSource();
+            _volumeDebounce = debounce;
+            _ = DebounceVolumeAsync(value, debounce);
         }
     }
     public string VolumeText => $"{Math.Round(Volume):0}";
@@ -190,19 +317,82 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
 
     internal void Apply(MixerChannel source)
     {
-        _volumeDebounce?.Cancel();
-        _volumeDebounce?.Dispose();
-        _volumeDebounce = null;
-        _volume = source.Volume * 100; _muted = source.Muted;
-        OnPropertyChanged(nameof(Volume)); OnPropertyChanged(nameof(VolumeText)); OnPropertyChanged(nameof(Muted)); OnPropertyChanged(nameof(MuteGlyph)); OnPropertyChanged(nameof(MuteAction));
+        if (_volumeDebounce is null && !EqualityComparer<double>.Default.Equals(_volume, source.Volume * 100))
+        {
+            _volume = source.Volume * 100;
+            OnPropertyChanged(nameof(Volume));
+            OnPropertyChanged(nameof(VolumeText));
+        }
+        if (_muted == source.Muted) return;
+        _muted = source.Muted;
+        OnPropertyChanged(nameof(Muted));
+        OnPropertyChanged(nameof(MuteGlyph));
+        OnPropertyChanged(nameof(MuteAction));
     }
 
     public Task ToggleMuteAsync() => _owner.ToggleMuteAsync(this);
 
-    private async Task DebounceVolumeAsync(double value, CancellationToken token)
+    internal void ApplyOptions(
+        SonarPresetCatalog presetCatalog,
+        IReadOnlyList<SonarAudioDevice> devices,
+        string? selectedDeviceId)
     {
-        try { await Task.Delay(90, token); await _owner.SetVolumeAsync(this, value); }
+        Replace(Presets, presetCatalog.Items);
+        Replace(Devices, devices);
+        SetSelectedPreset(presetCatalog.SelectedId);
+        SetSelectedDevice(selectedDeviceId);
+    }
+
+    internal void ApplyMasterOutputOptions(IReadOnlyList<SonarAudioDevice> devices)
+    {
+        Replace(Devices, devices);
+        _masterOutputOptionsLoaded = true;
+        OnPropertyChanged(nameof(SelectedDeviceName));
+    }
+
+    internal void SetSelectedPreset(Guid? presetId)
+    {
+        if (_selectedPresetId != presetId)
+        {
+            _selectedPresetId = presetId;
+            OnPropertyChanged(nameof(SelectedPresetId));
+        }
+        OnPropertyChanged(nameof(SelectedPresetName));
+    }
+
+    internal void SetSelectedDevice(string? deviceId)
+    {
+        if (!string.Equals(_selectedDeviceId, deviceId, StringComparison.OrdinalIgnoreCase))
+        {
+            _selectedDeviceId = deviceId;
+            OnPropertyChanged(nameof(SelectedDeviceId));
+        }
+        else if (IsMaster) OnPropertyChanged(nameof(SelectedDeviceId));
+        OnPropertyChanged(nameof(SelectedDeviceName));
+    }
+
+    private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> source)
+    {
+        target.Clear();
+        foreach (var item in source) target.Add(item);
+    }
+
+    private async Task DebounceVolumeAsync(double value, CancellationTokenSource debounce)
+    {
+        var failed = false;
+        try
+        {
+            await Task.Delay(90, debounce.Token);
+            await _owner.SetVolumeAsync(this, value);
+        }
         catch (OperationCanceledException) { }
+        catch { failed = true; }
+        finally
+        {
+            if (ReferenceEquals(_volumeDebounce, debounce)) _volumeDebounce = null;
+            debounce.Dispose();
+        }
+        if (failed) await _owner.RecoverFromWriteFailureAsync($"{Name} volume");
     }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

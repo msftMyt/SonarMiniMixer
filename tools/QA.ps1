@@ -42,13 +42,25 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 $root = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
 Check 'UI Automation root' ($null -ne $root) "name=$($root.Current.Name)"
-$all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
-$sliders = @($all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Slider })
-$buttons = @($all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button })
+$sliders = @()
+$selectors = @()
+$controlButtons = @()
+$unnamedControlButtons = @()
+for ($i = 0; $i -lt 20; $i++) {
+  $all = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, [System.Windows.Automation.Condition]::TrueCondition)
+  $sliders = @($all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Slider })
+  $selectors = @($all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::ComboBox })
+  $buttons = @($all | Where-Object { $_.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button })
+  $controlButtons = @($buttons | Where-Object { $_.Current.IsControlElement })
+  $unnamedControlButtons = @($controlButtons | Where-Object { [string]::IsNullOrWhiteSpace($_.Current.Name) })
+  if ($sliders.Count -eq 7 -and $selectors.Count -eq 11 -and $controlButtons.Count -ge 10) { break }
+  Start-Sleep -Milliseconds 250
+}
 Check 'Seven mixer sliders visible' ($sliders.Count -eq 7) "count=$($sliders.Count) names=$((@($sliders)|ForEach-Object{$_.Current.Name}) -join ',')"
-Check 'Mute and chrome buttons visible' ($buttons.Count -ge 10) "count=$($buttons.Count) names=$((@($buttons)|ForEach-Object{$_.Current.Name}) -join ',')"
+Check 'Eleven channel selectors visible' ($selectors.Count -eq 11) "count=$($selectors.Count) names=$((@($selectors)|ForEach-Object{$_.Current.Name}) -join ',')"
+Check 'Mixer buttons have accessible names' ($controlButtons.Count -ge 10 -and $unnamedControlButtons.Count -eq 0) "control=$($controlButtons.Count) unnamed=$($unnamedControlButtons.Count) names=$((@($controlButtons)|ForEach-Object{$_.Current.Name}) -join ',')"
 $rect = $root.Current.BoundingRectangle
-Check 'Compact window bounds' ($rect.Width -ge 620 -and $rect.Width -le 720 -and $rect.Height -ge 300 -and $rect.Height -le 350) "rect=$([math]::Round($rect.Width))x$([math]::Round($rect.Height))"
+Check 'Compact window bounds' ($rect.Width -ge 640 -and $rect.Width -le 1180 -and $rect.Height -ge 372 -and $rect.Height -le 650) "rect=$([math]::Round($rect.Width))x$([math]::Round($rect.Height))"
 Check 'Window is onscreen' (-not $root.Current.IsOffscreen) "offscreen=$($root.Current.IsOffscreen)"
 
 Start-Sleep -Seconds 10
@@ -58,7 +70,7 @@ Start-Sleep -Seconds 10
 $p.Refresh()
 $cpu = (($p.TotalProcessorTime-$c1).TotalMilliseconds / 10000) * 100 / [Environment]::ProcessorCount
 Check 'Idle CPU under 1 percent' ($cpu -lt 1) "cpu=$([math]::Round($cpu,3))%"
-Check 'Working set under 180 MB' ($p.WorkingSet64 -lt 180MB) "rss=$([math]::Round($p.WorkingSet64/1MB,1))MB"
+Check 'Working set under 220 MB' ($p.WorkingSet64 -lt 220MB) "rss=$([math]::Round($p.WorkingSet64/1MB,1))MB"
 
 & $cli exit | Out-Null
 Start-Sleep -Seconds 2

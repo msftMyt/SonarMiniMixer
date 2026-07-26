@@ -122,6 +122,83 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal(1, endpoints.Invalidations);
         Equal(true, handler.Authorities.Contains("127.0.0.1:64708"));
     }),
+    ("client loads and orders presets with the selected preset", async () =>
+    {
+        var selectedId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var handler = new RecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/presets/game" => Json($$"""
+                [
+                  {"id":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","name":"Balanced","isFavorite":false,"favoritePosition":0},
+                  {"id":"{{selectedId}}","name":"FPS Footsteps","isFavorite":true,"favoritePosition":0}
+                ]
+                """),
+            "/configs/selected" => Json($$"""
+                [{"id":"{{selectedId}}","name":"FPS Footsteps","virtualAudioDevice":"game"}]
+                """),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        var catalog = await client.GetPresetsAsync("game");
+        Equal("game", catalog.Channel);
+        Equal(2, catalog.Items.Count);
+        Equal("FPS Footsteps", catalog.Items[0].Name);
+        Equal(true, catalog.Items[0].IsFavorite);
+        Equal(selectedId, catalog.SelectedId);
+    }),
+    ("client validates preset ownership before selecting", async () =>
+    {
+        var gamePreset = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var otherPreset = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var handler = new RecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/presets/game" => Json($$"""
+                [{"id":"{{gamePreset}}","name":"FPS Footsteps","isFavorite":true,"favoritePosition":0}]
+                """),
+            "/configs/selected" => Json("[]"),
+            _ when request.Method == HttpMethod.Put => new HttpResponseMessage(HttpStatusCode.OK),
+            _ => new HttpResponseMessage(HttpStatusCode.NotFound)
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        await ThrowsAsync<ArgumentException>(() => client.SelectPresetAsync("master", gamePreset));
+        await ThrowsAsync<ArgumentException>(() => client.SelectPresetAsync("game", otherPreset));
+        Equal(false, handler.Requests.Any(x => x.StartsWith("PUT", StringComparison.Ordinal)));
+        await client.SelectPresetAsync("game", gamePreset);
+        Equal(true, handler.Requests.Contains($"PUT /configs/{gamePreset}/select"));
+    }),
+    ("client loads physical devices and each classic channel selection", async () =>
+    {
+        const string outputId = "{0.0.0.00000000}.{output-device}";
+        const string microphoneId = "{0.0.1.00000000}.{microphone-device}";
+        var handler = DeviceHandler(outputId, microphoneId);
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        var routing = await client.GetDeviceRoutingAsync();
+        Equal(1, routing.OutputDevices.Count);
+        Equal("Arctis Nova Pro", routing.OutputDevices[0].Name);
+        Equal(1, routing.MicrophoneDevices.Count);
+        Equal(outputId, routing.ChannelDeviceIds["game"]);
+        Equal(outputId, routing.ChannelDeviceIds["chatRender"]);
+        Equal(outputId, routing.ChannelDeviceIds["media"]);
+        Equal(outputId, routing.ChannelDeviceIds["aux"]);
+        Equal(microphoneId, routing.ChannelDeviceIds["chatCapture"]);
+    }),
+    ("client validates and changes physical devices per channel", async () =>
+    {
+        const string outputId = "{0.0.0.00000000}.{output-device}";
+        const string microphoneId = "{0.0.1.00000000}.{microphone-device}";
+        var handler = DeviceHandler(outputId, microphoneId);
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        await ThrowsAsync<ArgumentException>(() => client.SetChannelDeviceAsync("master", outputId));
+        await ThrowsAsync<ArgumentException>(() => client.SetChannelDeviceAsync("game", "unknown"));
+        await ThrowsAsync<ArgumentException>(() => client.SetChannelDeviceAsync("chatCapture", outputId));
+        await client.SetChannelDeviceAsync("game", outputId);
+        await client.SetChannelDeviceAsync("chatRender", outputId);
+        await client.SetChannelDeviceAsync("chatCapture", microphoneId);
+        Equal(true, handler.Requests.Any(x => x.StartsWith("PUT /classicRedirections/game/deviceId/", StringComparison.Ordinal)));
+        Equal(true, handler.Requests.Any(x => x.StartsWith("PUT /classicRedirections/chat/deviceId/", StringComparison.Ordinal)));
+        Equal(true, handler.Requests.Any(x => x.StartsWith("PUT /classicRedirections/mic/deviceId/", StringComparison.Ordinal)));
+        Equal(false, handler.Requests.Any(x => x.StartsWith("PUT /classicRedirections/render/deviceId/", StringComparison.Ordinal)));
+    }),
     ("settings store recovers from corrupt JSON and writes atomically", async () =>
     {
         var root = Path.Combine(Path.GetTempPath(), "SonarMiniMixerTests", Guid.NewGuid().ToString("N"));
@@ -130,7 +207,7 @@ var tests = new (string Name, Func<Task> Run)[]
         await File.WriteAllTextAsync(path, "not-json");
         var store = new SettingsStore(path);
         Equal(AppSettings.Default, await store.LoadAsync());
-        var expected = new AppSettings(true, true, 815, 380, 44, 55);
+        var expected = new AppSettings(true, true, 900, 424, 44, 55);
         await store.SaveAsync(expected);
         Equal(expected, await store.LoadAsync());
         Equal(false, File.Exists(path + ".tmp"));
@@ -153,6 +230,26 @@ static RecordingHandler HealthyHandler() => new(request => request.RequestUri!.A
     "/chatMix" => Json("{\"balance\":0.1,\"state\":\"enabled\"}"),
     "/mode/" => Json("\"classic\""),
     _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+});
+static RecordingHandler DeviceHandler(string outputId, string microphoneId) => new(request => request.RequestUri!.AbsolutePath switch
+{
+    "/audioDevices" when request.RequestUri.Query.Contains("deviceDataFlow=render", StringComparison.OrdinalIgnoreCase) => Json($$"""
+        [{"friendlyName":"Arctis Nova Pro","id":"{{outputId}}","dataFlow":"render","role":"none","channels":2,"defaultRole":"none","fwUpdateRequired":false,"state":"active","isVad":false}]
+        """),
+    "/audioDevices" when request.RequestUri.Query.Contains("deviceDataFlow=capture", StringComparison.OrdinalIgnoreCase) => Json($$"""
+        [{"friendlyName":"Broadcast Microphone","id":"{{microphoneId}}","dataFlow":"capture","role":"none","channels":1,"defaultRole":"none","fwUpdateRequired":false,"state":"active","isVad":false}]
+        """),
+    "/classicRedirections" => Json($$"""
+        [
+          {"id":"game","deviceId":"{{outputId}}","isRunning":true},
+          {"id":"chat","deviceId":"{{outputId}}","isRunning":true},
+          {"id":"media","deviceId":"{{outputId}}","isRunning":true},
+          {"id":"aux","deviceId":"{{outputId}}","isRunning":true},
+          {"id":"mic","deviceId":"{{microphoneId}}","isRunning":true}
+        ]
+        """),
+    _ when request.Method == HttpMethod.Put => new HttpResponseMessage(HttpStatusCode.OK),
+    _ => new HttpResponseMessage(HttpStatusCode.NotFound)
 });
 static Task Sync(Action action) { action(); return Task.CompletedTask; }
 static void Equal<T>(T expected, T actual) { if (!EqualityComparer<T>.Default.Equals(expected, actual)) throw new Exception($"expected {expected}, got {actual}"); }

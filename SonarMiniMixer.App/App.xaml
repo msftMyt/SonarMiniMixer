@@ -3,20 +3,123 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              ShutdownMode="OnExplicitShutdown">
   <Application.Resources>
-    <SolidColorBrush x:Key="SurfaceBrush" Color="#16141F" />
-    <SolidColorBrush x:Key="RaisedBrush" Color="#211E2C" />
-    <SolidColorBrush x:Key="TextBrush" Color="#F4F1FA" />
-    <SolidColorBrush x:Key="MutedTextBrush" Color="#9992A8" />
-    <SolidColorBrush x:Key="BorderBrush" Color="#3A3547" />
+    <!-- Hallmark · pre-emit critique: P5 H4 E4 S5 R5 V4 · OLED instrument / restrained plum shell / disciplined channel color -->
+    <SolidColorBrush x:Key="WindowBrush" Color="#100D16" />
+    <SolidColorBrush x:Key="SurfaceBrush" Color="#15101D" />
+    <SolidColorBrush x:Key="RaisedBrush" Color="#1C1425" />
+    <SolidColorBrush x:Key="HoverBrush" Color="#271C33" />
+    <SolidColorBrush x:Key="PressedBrush" Color="#33233F" />
+    <SolidColorBrush x:Key="TrackBrush" Color="#51485D" />
+    <SolidColorBrush x:Key="DividerBrush" Color="#2D2437" />
+    <SolidColorBrush x:Key="BorderBrush" Color="#3D304A" />
+    <SolidColorBrush x:Key="GrooveBrush" Color="#080610" />
+    <SolidColorBrush x:Key="GrooveEdgeBrush" Color="#3B3049" />
+    <SolidColorBrush x:Key="CapBrush" Color="#2A2236" />
+    <SolidColorBrush x:Key="CapEdgeBrush" Color="#554668" />
+    <SolidColorBrush x:Key="CapHoverBrush" Color="#3A2F4A" />
+    <SolidColorBrush x:Key="TextBrush" Color="#F7F4FA" />
+    <SolidColorBrush x:Key="MutedTextBrush" Color="#C9C2D0" />
+    <SolidColorBrush x:Key="DimTextBrush" Color="#A79DB2" />
+    <SolidColorBrush x:Key="FocusBrush" Color="#C26CFF" />
+    <SolidColorBrush x:Key="SuccessBrush" Color="#63E6A4" />
+    <SolidColorBrush x:Key="WarningBrush" Color="#F2B86B" />
+    <SolidColorBrush x:Key="DangerBrush" Color="#FF6677" />
+    <SolidColorBrush x:Key="ChatMixBrush" Color="#F0B35B" />
     <Style TargetType="ToolTip">
-      <Setter Property="Background" Value="#2B2737"/><Setter Property="Foreground" Value="White"/>
-      <Setter Property="BorderBrush" Value="#4A435C"/><Setter Property="Padding" Value="8,5"/>
+      <Setter Property="Background" Value="{StaticResource RaisedBrush}"/>
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Padding" Value="9,6"/>
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+      <Setter Property="FontSize" Value="11"/>
     </Style>
     <Style x:Key="ChromeButton" TargetType="Button">
-      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/><Setter Property="Background" Value="Transparent"/>
-      <Setter Property="BorderThickness" Value="0"/><Setter Property="Width" Value="34"/><Setter Property="Height" Value="34"/>
-      <Setter Property="FontSize" Value="16"/><Setter Property="Cursor" Value="Hand"/>
-      <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button"><Border x:Name="B" Background="{TemplateBinding Background}" CornerRadius="7"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><ControlTemplate.Triggers><Trigger Property="IsMouseOver" Value="True"><Setter TargetName="B" Property="Background" Value="#332E42"/><Setter Property="Foreground" Value="White"/></Trigger><Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="B" Property="BorderBrush" Value="#BD93F9"/><Setter TargetName="B" Property="BorderThickness" Value="1"/></Trigger></ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
+      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}"/>
+      <Setter Property="Background" Value="Transparent"/>
+      <Setter Property="BorderBrush" Value="Transparent"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="MinWidth" Value="34"/>
+      <Setter Property="Height" Value="32"/>
+      <Setter Property="Padding" Value="8,0"/>
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+      <Setter Property="FontSize" Value="10"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="Chrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="5">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource HoverBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource PressedBrush}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="SecondaryButton" TargetType="Button">
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+      <Setter Property="Background" Value="{StaticResource RaisedBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource BorderBrush}"/>
+      <Setter Property="BorderThickness" Value="1"/>
+      <Setter Property="Height" Value="34"/>
+      <Setter Property="Padding" Value="14,0"/>
+      <Setter Property="FontFamily" Value="Segoe UI Variable Text, Segoe UI"/>
+      <Setter Property="FontSize" Value="12"/>
+      <Setter Property="FontWeight" Value="SemiBold"/>
+      <Setter Property="Cursor" Value="Hand"/>
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="Button">
+            <Border x:Name="ButtonChrome"
+                    Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="5">
+              <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsMouseOver" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource HoverBrush}"/>
+              </Trigger>
+              <Trigger Property="IsPressed" Value="True">
+                <Setter TargetName="ButtonChrome" Property="Background" Value="{StaticResource PressedBrush}"/>
+              </Trigger>
+              <Trigger Property="IsKeyboardFocused" Value="True">
+                <Setter TargetName="ButtonChrome" Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+                <Setter TargetName="ButtonChrome" Property="BorderThickness" Value="2"/>
+              </Trigger>
+              <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
+    </Style>
+    <Style x:Key="PrimaryButton" TargetType="Button" BasedOn="{StaticResource SecondaryButton}">
+      <Setter Property="Background" Value="{StaticResource FocusBrush}"/>
+      <Setter Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+      <Setter Property="Foreground" Value="{StaticResource WindowBrush}"/>
     </Style>
   </Application.Resources>
 </Application>

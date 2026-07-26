@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="SonarMiniMixer.App/SonarMiniMixer.App.csproj" />
+  <Project Path="SonarMiniMixer.App.Tests/SonarMiniMixer.App.Tests.csproj" />
   <Project Path="SonarMiniMixer.Cli/SonarMiniMixer.Cli.csproj" />
   <Project Path="SonarMiniMixer.Core/SonarMiniMixer.Core.csproj" />
   <Project Path="SonarMiniMixer.Tests/SonarMiniMixer.Tests.csproj" />

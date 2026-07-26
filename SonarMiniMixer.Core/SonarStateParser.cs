@@ -9,12 +9,12 @@ public static class SonarStateParser
     private static readonly IReadOnlyDictionary<string, ChannelMetadata> Metadata =
         new Dictionary<string, ChannelMetadata>(StringComparer.Ordinal)
         {
-            ["master"] = new("Master", "#7C8CFF", 0),
-            ["game"] = new("Game", "#50FA7B", 10),
-            ["chatRender"] = new("Chat", "#4DD8FF", 20),
-            ["media"] = new("Media", "#FF79C6", 30),
-            ["aux"] = new("Aux", "#BD93F9", 40),
-            ["chatCapture"] = new("Mic", "#FFB86C", 50)
+            ["master"] = new("Master", "#19D3C5", 0),
+            ["game"] = new("Game", "#47F06A", 10),
+            ["chatRender"] = new("Chat", "#36B7FF", 20),
+            ["media"] = new("Media", "#FFB000", 30),
+            ["aux"] = new("Aux", "#B96CFF", 40),
+            ["chatCapture"] = new("Mic", "#FF5F69", 50)
         };
 
     public static MixerState Parse(string volumesJson, string chatMixJson, string modeJson)

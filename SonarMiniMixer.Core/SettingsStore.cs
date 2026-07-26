@@ -10,7 +10,7 @@ public sealed record AppSettings(
     double? Left,
     double? Top)
 {
-    public static AppSettings Default { get; } = new(false, false, 690, 330, null, null);
+    public static AppSettings Default { get; } = new(false, false, 864, 424, null, null);
 }
 
 public sealed class SettingsStore
@@ -48,7 +48,7 @@ public sealed class SettingsStore
 
     private static AppSettings Sanitize(AppSettings value) => value with
     {
-        Width = Math.Clamp(value.Width, 620, 1100),
-        Height = Math.Clamp(value.Height, 330, 650)
+        Width = Math.Clamp(value.Width, 640, 1180),
+        Height = Math.Clamp(value.Height, 372, 650)
     };
 }
