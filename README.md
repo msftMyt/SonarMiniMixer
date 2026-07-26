@@ -35,6 +35,16 @@ SteelSeries Sonar is powerful, but changing one volume level normally means reop
 - **Optional Windows startup** with no administrator privileges
 - **No drivers, telemetry, accounts, ads, or cloud service**
 
+## What's new in 1.1
+
+- Per-channel **EQ presets** and per-channel **physical routing** replace the old single global output
+- **Master quick output** sends Game, Chat, Media, and Aux to one device at once, never the microphone
+- Rebuilt **OLED-dark UI** with a responsive layout that stays readable from 640x372 up to 1180x650
+- Live fader and ChatMix edits are no longer overwritten by the background refresh
+- Preset and routing errors degrade to a status message instead of disabling the mixer
+
+Full details are in the [changelog](CHANGELOG.md).
+
 ## Requirements
 
 | Requirement | Details |
@@ -242,9 +252,33 @@ The app uses WPF, the Windows Forms `NotifyIcon`, and [NAudio](https://github.co
 4. Optionally delete `%LOCALAPPDATA%\SonarMiniMixer` to remove saved window settings and diagnostics.
 5. Delete the **Sonar Mini Mixer** Start Menu shortcut if you used `Install.ps1`.
 
-## Known limitation
+## Known limitations
 
-SteelSeries does not document Sonar's local API. The app dynamically discovers changing ports and fails closed on unknown modes or channels, but a future GG update may require a compatibility update.
+- SteelSeries does not document Sonar's local API. The app dynamically discovers changing ports and fails closed on unknown modes or channels, but a future GG update may require a compatibility update.
+- Only Sonar's **Classic** mixer mode supports writes. Streamer mode is displayed but read-only.
+- Windows x64 only. There is no ARM64 build and no macOS or Linux equivalent, because Sonar itself is Windows-only.
+- Builds are not code-signed, so Windows SmartScreen warns on first run.
+- The mixer polls Sonar rather than subscribing to push events, so an external change can take up to two seconds to appear.
+
+## Roadmap
+
+Ideas under consideration. Feedback and pull requests on any of these are welcome — open an issue first for the larger ones.
+
+| Idea | Notes |
+|---|---|
+| Global hotkeys | System-wide keys for mute, volume nudge, and ChatMix center without focusing the mixer |
+| Per-channel volume presets | Save and recall whole mixer snapshots, for example "gaming", "music", "call" |
+| Live level meters | Peak meters per channel using the existing Core Audio endpoints |
+| Push updates | Replace polling with Sonar's event stream when a stable local event contract is confirmed |
+| Streamer mode support | Read and write Sonar's Streamer mixer once its channel model is verified |
+| ARM64 build | Publish a `win-arm64` artifact alongside x64 |
+| Signed releases | Code signing or reproducible-build attestation to reduce SmartScreen friction |
+| Theming | User-selectable accent colors and a light theme |
+| Localization | Externalize UI strings for translation |
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Contributing
 
