@@ -2,7 +2,7 @@
 
 All notable changes to Sonar Mini Mixer are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.1.1] - 2026-07-26
 
 ### Changed
 
@@ -49,6 +49,7 @@ All notable changes to Sonar Mini Mixer are documented here. This project follow
 
 - Initial release: tray mixer for Sonar's six Classic channels, volume and mute control, ChatMix with center reset, pinned mode, automatic reconnection, optional Windows startup, and a read-only diagnostics CLI.
 
+[1.1.1]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.1.1
 [1.1.0]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.1.0
 [1.0.1]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.0.1
 [1.0.0]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.0.0

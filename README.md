@@ -35,8 +35,9 @@ SteelSeries Sonar is powerful, but changing one volume level normally means reop
 - **Optional Windows startup** with no administrator privileges
 - **No drivers, telemetry, accounts, ads, or cloud service**
 
-## What's new in 1.1
+## What's new in 1.1.1
 
+- **New fader app icon** and a **microphone icon on the Mic mute button** so muting your voice reads differently from muting playback
 - Per-channel **EQ presets** and per-channel **physical routing** replace the old single global output
 - **Master quick output** sends Game, Chat, Media, and Aux to one device at once, never the microphone
 - Rebuilt **OLED-dark UI** with a responsive layout that stays readable from 640x372 up to 1180x650

@@ -29,6 +29,7 @@ internal static class Program
             ("mute controls expose toggle semantics and checked state", MuteToggleSemanticsAsync),
             ("mute controls render speaker and speaker-off icons", MuteIconographyAsync),
             ("mic channel mutes with a microphone icon, not a speaker", MicrophoneMuteIconographyAsync),
+            ("mute button automation name flips to Unmute when muted", MuteAutomationNameFlipsAsync),
             ("fader renders a groove with an accent level fill", FaderGrooveAndLevelFillAsync),
             ("responsive metrics scale between min, reference, and max", ResponsiveMetricScalingAsync),
             ("layout grows and shrinks without clipping", LayoutAdaptsToWindowSizeAsync),
@@ -153,6 +154,38 @@ internal static class Program
 
         static T Part<T>(ToggleButton button, string name) where T : FrameworkElement =>
             (T)button.Template.FindName(name, button)!;
+    }
+
+    private static async Task MuteAutomationNameFlipsAsync()
+    {
+        using var fixture = new WindowFixture();
+        var client = new FakeSonarClient(State());
+        using var viewModel = new MixerViewModel(client);
+        await viewModel.RefreshAsync();
+
+        var mic = viewModel.Channels.Single(channel => channel.Id == "chatCapture");
+        Equal("Mute Mic", mic.MuteAction);
+
+        var button = new ToggleButton { Style = fixture.MuteStyle, DataContext = mic };
+        button.SetBinding(AutomationProperties.NameProperty, new System.Windows.Data.Binding(nameof(ChannelViewModel.MuteAction)));
+        button.SetBinding(ToggleButton.IsCheckedProperty,
+            new System.Windows.Data.Binding(nameof(ChannelViewModel.Muted)) { Mode = System.Windows.Data.BindingMode.OneWay });
+        button.Measure(new Size(30, 30));
+        button.Arrange(new Rect(0, 0, 30, 30));
+        button.ApplyTemplate();
+        button.UpdateLayout();
+        Equal("Mute Mic", AutomationProperties.GetName(button));
+
+        await mic.ToggleMuteAsync();
+        button.UpdateLayout();
+
+        Equal(true, mic.Muted);
+        Equal("Unmute Mic", mic.MuteAction);
+        Equal(true, button.IsChecked);
+        Equal("Unmute Mic", AutomationProperties.GetName(button));
+
+        var peer = UIElementAutomationPeer.CreatePeerForElement(button)!;
+        Equal("Unmute Mic", peer.GetName());
     }
 
     private static Task ResponsiveMetricScalingAsync()
