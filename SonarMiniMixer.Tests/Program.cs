@@ -1,3 +1,4 @@
+using System.Globalization;
 ﻿using System.Net;
 using System.Text;
 using SonarMiniMixer.Core;
@@ -19,6 +20,27 @@ var tests = new (string Name, Func<Task> Run)[]
         Throws<InvalidDataException>(() => EndpointSecurity.CreateLoopbackBaseUri("http://user:pass@127.0.0.1:10", "http"));
         Throws<InvalidDataException>(() => EndpointSecurity.CreateLoopbackBaseUri("file:///c:/temp/x", "http"));
     })),
+    ("endpoint discovery waits for Sonar startup and accepts encrypted metadata", async () =>
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SonarEndpointTests", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var props = Path.Combine(root, "coreProps.json");
+        await File.WriteAllTextAsync(props, "{\"ggEncryptedAddress\":\"127.0.0.1:6327\"}");
+        var calls = 0;
+        var handler = new RecordingHandler(_ =>
+        {
+            calls++;
+            return Json(calls < 3
+                ? "{\"subApps\":{\"sonar\":{\"metadata\":{\"webServerAddress\":\"\",\"encryptedWebServerAddress\":\"\"}}}}"
+                : "{\"subApps\":{\"sonar\":{\"metadata\":{\"webServerAddress\":\"\",\"encryptedWebServerAddress\":\"127.0.0.1:65000\"}}}}");
+        });
+        using var provider = new SteelSeriesEndpointProvider(props, handler);
+
+        Equal("https://127.0.0.1:65000/", (await provider.GetAsync()).ToString());
+        Equal(3, calls);
+        Directory.Delete(root, true);
+    }),
+
     ("state parser maps every classic channel", () => Sync(() =>
     {
         var state = SonarStateParser.Parse(VolumesJson, "{\"balance\":-0.25,\"state\":\"enabled\"}", "\"classic\"");
@@ -38,8 +60,11 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal(false, state.CanControl);
         Equal(false, state.CanControlChatMix);
     })),
-    ("client writes channel changes through Core Audio", async () =>
+    ("client writes channel changes where Sonar broadcasts them", async () =>
     {
+        // Core Audio writes make Sonar raise SONAR_EVENT_VOLUME_DATA, which is what
+        // keeps GG's own mixer in sync. The volumeSettings HTTP route changes state
+        // silently (and aliases playback channels onto the master), so it is not used.
         var handler = HealthyHandler();
         var audio = new RecordingAudioController();
         using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
@@ -47,9 +72,12 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal(6, state.Channels.Count);
         await client.SetVolumeAsync("game", 0.75);
         await client.SetMuteAsync("chatRender", true);
+        await client.SetVolumeAsync("master", 0.8);
         Contains(audio.Writes, "VOLUME game 0.75");
         Contains(audio.Writes, "MUTE chatRender true");
-        Equal(false, handler.Requests.Any(x => x.StartsWith("PUT /volumeSettings", StringComparison.Ordinal)));
+        Contains(audio.Writes, "VOLUME master 0.8");
+        Equal(true, handler.Requests.Contains("PUT /volumeSettings/classic/master/Volume/0.8"));
+        Equal(false, handler.Requests.Any(x => x.StartsWith("PUT /volumeSettings/classic/game", StringComparison.Ordinal)));
     }),
     ("client refuses absent channels and non-classic mode", async () =>
     {
@@ -69,6 +97,210 @@ var tests = new (string Name, Func<Task> Run)[]
         await ThrowsAsync<SonarConnectionException>(() => client.SetVolumeAsync("master", 0.5));
         Equal(0, audio.Writes.Count);
     }),
+    ("routing reports channels Sonar has stopped running", async () =>
+    {
+        // Sonar marks a redirection isRunning=false when its device is gone or the
+        // route failed. GG surfaces that; the mixer must expose it too instead of
+        // showing a healthy-looking selection that is not actually passing audio.
+        var outputId = "{0.0.0.00000000}.{aaaa}";
+        var micId = "{0.0.1.00000000}.{bbbb}";
+        var handler = new RecordingHandler(request => request.RequestUri!.PathAndQuery switch
+        {
+            var p when p.StartsWith("/audioDevices?deviceDataFlow=render") =>
+                Json($$"""[{"id":"{{outputId}}","name":"Speakers","dataFlow":"render"}]"""),
+            var p when p.StartsWith("/audioDevices?deviceDataFlow=capture") =>
+                Json($$"""[{"id":"{{micId}}","name":"Mic","dataFlow":"capture"}]"""),
+            "/classicRedirections" => Json($$"""
+                [{"id":"game","deviceId":"{{outputId}}","isRunning":true},
+                 {"id":"chat","deviceId":"{{outputId}}","isRunning":false},
+                 {"id":"media","deviceId":"{{outputId}}","isRunning":true},
+                 {"id":"aux","deviceId":"{{outputId}}","isRunning":true},
+                 {"id":"mic","deviceId":"{{micId}}","isRunning":false}]
+                """),
+            _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        var routing = await client.GetDeviceRoutingAsync();
+
+        Equal(true, routing.StalledChannels.Contains("chatRender"));
+        Equal(true, routing.StalledChannels.Contains("chatCapture"));
+        Equal(false, routing.StalledChannels.Contains("game"));
+        Equal(2, routing.StalledChannels.Count);
+    }),
+
+    ("mixer mirrors Sonar values exactly", async () =>
+    {
+        // The mixer is a remote control for GG: what Sonar stores is what we show,
+        // and what the user drags is written back unmodified. No scaling either way.
+        var master = 0.5;
+        var gameVolume = 0.4;
+        var writes = new List<string>();
+        string Volumes() =>
+            $"{{\"masters\":{{\"classic\":{{\"volume\":{master.ToString(CultureInfo.InvariantCulture)},\"muted\":false}}}}," +
+            $"\"devices\":{{\"game\":{{\"classic\":{{\"volume\":{gameVolume.ToString(CultureInfo.InvariantCulture)},\"muted\":false}}}}}}}}";
+
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Put) { writes.Add(path); return Json(Volumes()); }
+            return path switch
+            {
+                "/volumeSettings/classic" => Json(Volumes()),
+                "/mode/" => Json("\"classic\""),
+                "/v1/chatMix" => Json("{\"balance\":0,\"state\":\"enabled\"}"),
+                _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+            };
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+
+        // Displayed values are Sonar's values, untouched.
+        var state = await client.GetStateAsync();
+        Equal(0.4, Math.Round(state.Channels.First(c => c.Id == "game").Volume, 4));
+        Equal(0.5, Math.Round(state.Channels.First(c => c.Id == "master").Volume, 4));
+
+        // Values go out verbatim: no scaling applied on the way to Sonar.
+        var audio = new RecordingAudioController();
+        using var writer = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
+        await writer.SetVolumeAsync("game", 0.6);
+        Contains(audio.Writes, "VOLUME game 0.6");
+        // Master commits over HTTP, then nudges Core Audio so Sonar broadcasts it.
+        await writer.SetVolumeAsync("master", 0.75);
+        Contains(audio.Writes, "VOLUME master 0.75");
+
+        // Reading a value and writing it straight back must not shift it.
+        var echoed = (await writer.GetStateAsync()).Channels.First(c => c.Id == "game").Volume;
+        await writer.SetVolumeAsync("game", echoed);
+        Contains(audio.Writes, "VOLUME game 0.4");
+    }),
+
+    ("event stream maps Sonar socket payloads", () =>
+    {
+        // Captured from a live SteelSeries GG session.
+        Equal(true, SonarEventStream.TryParse(
+            "{\"event\":\"EVENT_SONAR_CHATMIX_DATA\",\"data\":{\"balance\":-0.33,\"state\":\"enabled\"}}", out var chatMix));
+        Equal(SonarEventKind.ChatMixChanged, chatMix.Kind);
+        Equal(-0.33, Math.Round(chatMix.Balance, 4));
+        Equal("enabled", chatMix.ChatMixState);
+
+        // Mid-fan-out Sonar reports ChatMix as unavailable until every playback
+        // channel shares one output device.
+        Equal(true, SonarEventStream.TryParse(
+            "{\"event\":\"EVENT_SONAR_CHATMIX_DATA\",\"data\":{\"balance\":0.0,\"state\":\"differentDeviceSelected\"}}", out var mixed));
+        Equal("differentDeviceSelected", mixed.ChatMixState);
+
+        Equal(true, SonarEventStream.TryParse(
+            "{\"event\":\"SONAR_EVENT_REDIRECTION_STATUS_UPDATE\",\"data\":null}", out var routing));
+        Equal(SonarEventKind.RoutingChanged, routing.Kind);
+
+        // Physical-device volume events do not describe the six Sonar channel faders.
+        Equal(false, SonarEventStream.TryParse(
+            "{\"event\":\"SONAR_EVENT_DEVICE_VOLUMES_UPDATE\",\"data\":[]}", out _));
+
+        // Captured from current GG when a channel volume changes through Core Audio.
+        Equal(true, SonarEventStream.TryParse(
+            "{\"event\":\"SONAR_EVENT_VOLUME_DATA\",\"data\":{\"masters\":{}}}", out var channelVolumes));
+        Equal(SonarEventKind.VolumesChanged, channelVolumes.Kind);
+        Equal("{\"masters\":{}}", channelVolumes.VolumePayload);
+
+        Equal(true, SonarEventStream.TryParse(
+            "{\"event\":\"SONAR_EVENT_FALLBACK_UPDATED\",\"data\":{}}", out var devices));
+        Equal(SonarEventKind.DevicesChanged, devices.Kind);
+
+        // Irrelevant and malformed payloads are ignored rather than throwing.
+        Equal(false, SonarEventStream.TryParse("{\"event\":\"SONAR_EVENT_FEATURE_UPDATED\",\"data\":{}}", out _));
+        Equal(false, SonarEventStream.TryParse("not json", out _));
+        Equal(false, SonarEventStream.TryParse("", out _));
+        return Task.CompletedTask;
+    }),
+
+    ("client rediscovers ChatMix path after GG endpoint changes", async () =>
+    {
+        var versioned = true;
+        var volumes = "{\"masters\":{\"classic\":{\"volume\":1.0,\"muted\":false}},\"devices\":{}}";
+        var handler = new RecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/volumeSettings/classic" => Json(volumes),
+            "/mode/" => Json("\"classic\""),
+            "/v1/chatMix" => versioned
+                ? Json("{\"balance\":0.2,\"state\":\"enabled\"}")
+                : new HttpResponseMessage(HttpStatusCode.NotFound),
+            "/chatMix" => versioned
+                ? new HttpResponseMessage(HttpStatusCode.NotFound)
+                : Json("{\"balance\":-0.4,\"state\":\"enabled\"}"),
+            _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+
+        Equal(0.2, Math.Round((await client.GetStateAsync()).ChatMix, 4));
+        versioned = false;
+        Equal(-0.4, Math.Round((await client.GetStateAsync()).ChatMix, 4));
+        Equal(true, handler.Requests.Contains("GET /chatMix"));
+    }),
+
+    ("client reads and writes ChatMix through the versioned endpoint", async () =>
+    {
+        // Newer SteelSeries GG moved ChatMix to /v1/chatMix; older builds serve /chatMix.
+        var volumes = "{\"masters\":{\"classic\":{\"volume\":1.0,\"muted\":false}}," +
+                      "\"devices\":{\"game\":{\"classic\":{\"volume\":0.5,\"muted\":false}}}}";
+        var writes = new List<string>();
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Put)
+            {
+                writes.Add(path + request.RequestUri.Query);
+                return path == "/v1/chatMix"
+                    ? Json("{\"balance\":0.2,\"state\":\"enabled\"}")
+                    : new HttpResponseMessage(HttpStatusCode.NotFound);
+            }
+            return path switch
+            {
+                "/volumeSettings/classic" => Json(volumes),
+                "/mode/" => Json("\"classic\""),
+                "/chatMix" => new HttpResponseMessage(HttpStatusCode.NotFound),
+                "/v1/chatMix" => Json("{\"balance\":-0.1,\"state\":\"enabled\"}"),
+                _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+            };
+        });
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+
+        var state = await client.GetStateAsync();
+        Equal(true, state.CanControlChatMix);
+        Equal(-0.1, Math.Round(state.ChatMix, 4));
+
+        await client.SetChatMixAsync(0.2);
+        Equal(true, writes.Any(w => w.StartsWith("/v1/chatMix?", StringComparison.Ordinal)));
+    }),
+
+    ("client stays connected when Sonar no longer exposes ChatMix", async () =>
+    {
+        // Newer SteelSeries GG builds removed /chatMix from the Sonar sub-app.
+        // The mixer must keep working with ChatMix simply unavailable.
+        var volumes = "{\"masters\":{\"classic\":{\"volume\":1.0,\"muted\":false}}," +
+                      "\"devices\":{\"game\":{\"classic\":{\"volume\":0.5,\"muted\":false}}}}";
+        var handler = new RecordingHandler(request => request.RequestUri!.AbsolutePath switch
+        {
+            "/volumeSettings/classic" => Json(volumes),
+            "/mode/" => Json("\"classic\""),
+            "/chatMix" => new HttpResponseMessage(HttpStatusCode.NotFound),
+            _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+        });
+        var audio = new RecordingAudioController();
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
+
+        var state = await client.GetStateAsync();
+        Equal("classic", state.Mode);
+        Equal(false, state.CanControlChatMix);
+        Equal(true, state.Channels.Count >= 2);
+
+        // Volume still writes even though ChatMix is gone.
+        await client.SetVolumeAsync("game", 0.4);
+        Equal(1, audio.Writes.Count);
+
+        // Attempting ChatMix fails cleanly rather than breaking the connection.
+        await ThrowsAsync<SonarConnectionException>(() => client.SetChatMixAsync(0.2));
+    }),
+
     ("client refuses ChatMix outside Classic or when disabled", async () =>
     {
         var mode = "stream";
@@ -145,6 +377,12 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal("FPS Footsteps", catalog.Items[0].Name);
         Equal(true, catalog.Items[0].IsFavorite);
         Equal(selectedId, catalog.SelectedId);
+
+        var presetReads = handler.Requests.Count(request => request.StartsWith("GET /presets/", StringComparison.Ordinal));
+        var selected = await client.GetSelectedPresetIdsAsync();
+        Equal(selectedId, selected["game"]);
+        // Refreshing selected IDs must not download the large preset catalogs again.
+        Equal(presetReads, handler.Requests.Count(request => request.StartsWith("GET /presets/", StringComparison.Ordinal)));
     }),
     ("client validates preset ownership before selecting", async () =>
     {

@@ -39,19 +39,30 @@ public partial class App : System.Windows.Application
             _mutex = new Mutex(true, MutexName, out var created);
             if (!created)
             {
-                _ = CommandLine.RunAsync(["show"]);
-                Shutdown();
-                return;
+                var result = CommandLine.RunAsync(["show"]).GetAwaiter().GetResult();
+                if (result == 0)
+                {
+                    Environment.Exit(0);
+                    return;
+                }
+
+                // The previous owner can release its mutex after stopping IPC but before
+                // this process starts. Retry ownership once instead of becoming a hung
+                // duplicate with no IPC server.
+                _mutex.Dispose();
+                Thread.Sleep(250);
+                _mutex = new Mutex(true, MutexName, out created);
+                if (!created)
+                {
+                    Environment.Exit(result);
+                    return;
+                }
             }
 
-            var endpoints = new SteelSeriesEndpointProvider();
-            var client = new SonarClient(endpoints);
-            _window = new MainWindow(new MixerViewModel(client), new SettingsStore());
-            MainWindow = _window;
             StartupRegistration.RepairIfEnabled();
             CreateTrayIcon();
             StartIpcServer();
-            if (!e.Args.Contains("--background")) _window.ShowFromTray();
+            if (!e.Args.Contains("--background")) OpenMixer();
         }
         catch (Exception exception)
         {
@@ -72,14 +83,38 @@ public partial class App : System.Windows.Application
             Visible = true,
             ContextMenuStrip = new Forms.ContextMenuStrip()
         };
-        _trayIcon.ContextMenuStrip.Items.Add("Open mixer", null, (_, _) => Dispatcher.Invoke(() => _window?.ShowFromTray()));
-        _trayIcon.ContextMenuStrip.Items.Add("Settings", null, (_, _) => Dispatcher.Invoke(() => new SettingsWindow { Owner = _window }.ShowDialog()));
+        _trayIcon.ContextMenuStrip.Items.Add("Open mixer", null, (_, _) => Dispatcher.Invoke(OpenMixer));
+        _trayIcon.ContextMenuStrip.Items.Add("Settings", null, (_, _) => Dispatcher.Invoke(OpenSettings));
         _trayIcon.ContextMenuStrip.Items.Add(new Forms.ToolStripSeparator());
         _trayIcon.ContextMenuStrip.Items.Add("Exit", null, (_, _) => Dispatcher.Invoke(ExitApp));
         _trayIcon.MouseClick += (_, args) =>
         {
-            if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(() => _window?.ToggleFromTray());
+            if (args.Button == Forms.MouseButtons.Left) Dispatcher.Invoke(() =>
+            {
+                if (_window is { IsVisible: true }) _window.ToggleFromTray();
+                else OpenMixer();
+            });
         };
+    }
+
+    private MainWindow EnsureWindow()
+    {
+        if (_window is not null) return _window;
+        var client = new SonarClient(new SteelSeriesEndpointProvider());
+        var viewModel = new MixerViewModel(client);
+        viewModel.AttachEventStream(new SonarEventStream(new SteelSeriesEndpointProvider()));
+        _window = new MainWindow(viewModel, new SettingsStore());
+        MainWindow = _window;
+        return _window;
+    }
+
+    private void OpenMixer() => EnsureWindow().ShowFromTray();
+
+    private void OpenSettings()
+    {
+        var settings = new SettingsWindow();
+        if (_window is not null) settings.Owner = _window;
+        settings.ShowDialog();
     }
 
     private void StartIpcServer()
@@ -103,7 +138,7 @@ public partial class App : System.Windows.Application
                     var command = Encoding.UTF8.GetString(buffer, 0, count);
                     await Dispatcher.InvokeAsync(() =>
                     {
-                        if (command == "show") _window?.ShowFromTray();
+                        if (command == "show") OpenMixer();
                         else if (command == "exit") ExitApp();
                     });
                 }

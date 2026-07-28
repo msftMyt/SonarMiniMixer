@@ -124,12 +124,13 @@ Sonar Mini Mixer is a remote-control surface, not an audio engine. It does not p
 
 ```text
 Sonar Mini Mixer
+├─ subscribes to Sonar's local event socket for instant state changes
 ├─ reads channel state and ChatMix from Sonar's loopback service
 ├─ writes channel volume/mute through matching Windows Core Audio endpoints
-└─ writes ChatMix through Sonar's local control and GG notification paths
+└─ writes ChatMix and physical routing through Sonar's local control paths
 ```
 
-This hybrid local integration allows both the audio state and SteelSeries GG's visible mixer controls to remain synchronized. Sonar's service port is rediscovered dynamically whenever GG restarts.
+Sonar pushes every change over its local event socket, so the mixer reflects adjustments made in SteelSeries GG within roughly 200 ms instead of waiting for a polling interval. A slow poll remains only as a safety net if the socket drops. Sonar's service port is rediscovered dynamically whenever GG restarts.
 
 ## Connection states
 
@@ -138,7 +139,7 @@ This hybrid local integration allows both the audio state and SteelSeries GG's v
 | **Sonar connected** | Controls are live and synchronized |
 | **Sonar unavailable** | GG or Sonar is not running; the mixer retries automatically |
 | **Unsupported mode** | State remains visible, but writes are disabled to fail safely |
-| **ChatMix unavailable** | The current Sonar device configuration does not expose ChatMix |
+| **ChatMix unavailable** | Sonar disables ChatMix unless Game, Chat, Media, and Aux share one output device |
 
 ## Privacy and security
 

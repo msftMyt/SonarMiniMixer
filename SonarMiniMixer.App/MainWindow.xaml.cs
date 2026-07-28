@@ -26,11 +26,21 @@ public partial class MainWindow : Window
         DataContext = viewModel;
         Loaded += Window_Loaded;
         Closing += Window_Closing;
+        // Single hook for every show/hide path (tray toggle, Esc, deactivate, close-to-tray)
+        // so a hidden popup stops polling Sonar and resyncs the moment it returns.
+        IsVisibleChanged += async (_, e) =>
+        {
+            if (!_loaded) return;
+            await _viewModel.SetSurfaceVisibleAsync(e.NewValue is true);
+        };
     }
 
     private async void Window_Loaded(object sender, RoutedEventArgs e)
     {
         _loaded = true;
+        // Launching with --background never shows the window, so seed the real state
+        // rather than assuming visible and polling for a surface nobody is looking at.
+        _viewModel.SetSurfaceVisible(IsVisible);
         _settings = await _settingsStore.LoadAsync();
         Width = _settings.Width;
         Height = _settings.Height;
@@ -186,7 +196,7 @@ public partial class MainWindow : Window
             Hide();
             return;
         }
-        await SaveSettingsAsync();
+        if (_loaded) await SaveSettingsAsync();
         _viewModel.Dispose();
     }
 

@@ -20,7 +20,14 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     private bool _canControlChatMix;
     private double _chatMix;
     private CancellationTokenSource? _chatMixDebounce;
+    private const int OptionsRefreshSeconds = 30;
     private DateTimeOffset _nextOptionsRefresh;
+    private bool _presetsLoaded;
+    private SonarEventStream? _events;
+    private CancellationTokenSource? _routingDebounce;
+    private bool _suppressRoutingRefresh;
+    private bool _surfaceVisible = true;
+    private bool _disposed;
 
     public ObservableCollection<ChannelViewModel> Channels { get; } = [];
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -49,22 +56,174 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     public MixerViewModel(ISonarClient client)
     {
         _client = client;
+        // Sonar pushes changes over its event socket, so polling is only a slow
+        // safety net for missed events / reconnects rather than the primary path.
+        // Visible fallback cadence matches the original release's responsiveness.
+        // Hidden windows do not poll at all; Sonar's socket remains authoritative.
         _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _pollTimer.Tick += async (_, _) => await RefreshAsync();
+    }
+
+    /// <summary>Attaches a live Sonar push feed so external changes appear immediately.</summary>
+    public void AttachEventStream(SonarEventStream stream)
+    {
+        _events = stream;
+        stream.EventReceived += OnSonarEvent;
+        stream.ConnectionChanged += OnEventStreamConnectionChanged;
+    }
+
+    internal void OnEventStreamConnectionChanged(bool connected)
+    {
+        if (_disposed) return;
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(() => OnEventStreamConnectionChanged(connected));
+            return;
+        }
+        if (!connected)
+        {
+            Connected = false;
+            CanControl = false;
+            CanControlChatMix = false;
+            Status = "Sonar reconnecting";
+            StatusDetail = "Waiting for SteelSeries GG to restart Sonar...";
+            return;
+        }
+        // A fresh socket means Sonar restarted or moved ports. Force the next state read
+        // to rebuild routing/options immediately rather than waiting up to 30 seconds.
+        _nextOptionsRefresh = DateTimeOffset.MinValue;
+        _ = RefreshAsync();
+    }
+
+    internal void OnSonarEvent(SonarEvent sonarEvent)
+    {
+        if (_disposed) return;
+        var dispatcher = System.Windows.Application.Current?.Dispatcher;
+        if (dispatcher is not null && !dispatcher.CheckAccess())
+        {
+            dispatcher.BeginInvoke(() => OnSonarEvent(sonarEvent));
+            return;
+        }
+
+        switch (sonarEvent.Kind)
+        {
+            case SonarEventKind.ChatMixChanged:
+                // Sonar reports ChatMix as unavailable while playback channels are
+                // split across devices; mirror that instead of guessing.
+                CanControlChatMix = string.Equals(sonarEvent.ChatMixState, "enabled", StringComparison.OrdinalIgnoreCase);
+                if (_chatMixDebounce is null)
+                {
+                    _isApplyingState = true;
+                    try { ChatMix = sonarEvent.Balance * 100; }
+                    finally { _isApplyingState = false; }
+                }
+                break;
+            case SonarEventKind.RoutingChanged:
+            case SonarEventKind.DevicesChanged:
+                if (_suppressRoutingRefresh) break;
+                _ = RefreshRoutingSoonAsync();
+                break;
+            case SonarEventKind.VolumesChanged:
+                if (_suppressRoutingRefresh) break;
+                if (sonarEvent.VolumePayload is { } payload)
+                {
+                    try
+                    {
+                        var pushed = SonarStateParser.Parse(payload, "{}", "\"classic\"");
+                        _isApplyingState = true;
+                        try
+                        {
+                            foreach (var channel in pushed.Channels)
+                                Channels.FirstOrDefault(existing => existing.Id == channel.Id)?.Apply(channel);
+                        }
+                        finally { _isApplyingState = false; }
+                    }
+                    catch (SonarConnectionException) { /* malformed push; safety poll will recover */ }
+                }
+                else _ = RefreshAsync();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Coalesces the burst of routing events Sonar emits during a multi-channel
+    /// change into a single refresh once the dust settles.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> WriteEachAsync(IEnumerable<ChannelViewModel> channels, string deviceId)
+    {
+        var failed = new List<string>();
+        foreach (var channel in channels)
+        {
+            try { await _client.SetChannelDeviceAsync(channel.Id, deviceId); }
+            catch { failed.Add(channel.Id); }
+        }
+        return failed;
+    }
+
+    private async Task RefreshRoutingSoonAsync()
+    {
+        _routingDebounce?.Cancel();
+        var debounce = new CancellationTokenSource();
+        _routingDebounce = debounce;
+        try
+        {
+            await Task.Delay(120, debounce.Token);
+            if (_suppressRoutingRefresh) return;
+            await RefreshChannelOptionsAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch { /* transient; the poll safety net will catch up */ }
+        finally
+        {
+            if (ReferenceEquals(_routingDebounce, debounce)) _routingDebounce = null;
+            debounce.Dispose();
+        }
     }
 
     public async Task StartAsync()
     {
         await RefreshAsync();
-        _pollTimer.Start();
+        // Subscribe only after the initial channel/catalog state exists. Starting the
+        // socket earlier lets a routing event race initialization and cache an empty UI.
+        _events?.Start();
+        if (_surfaceVisible) _pollTimer.Start();
+    }
+
+    /// <summary>
+    /// Tracks whether the mixer surface is on screen. A hidden tray popup does not need
+    /// to poll: Sonar's push socket already reports every change, so polling only burns
+    /// HTTP and allocations no one can see.
+    /// </summary>
+    public void SetSurfaceVisible(bool visible)
+    {
+        if (_surfaceVisible == visible) return;
+        _surfaceVisible = visible;
+        if (visible) _pollTimer.Start();
+        else _pollTimer.Stop();
+    }
+
+    /// <summary>Becomes visible and immediately resyncs so nothing on screen is stale.</summary>
+    public async Task SetSurfaceVisibleAsync(bool visible)
+    {
+        SetSurfaceVisible(visible);
+        if (visible) await RefreshAsync();
+    }
+
+    public void PollForTest()
+    {
+        if (!_surfaceVisible) return;
+        _ = RefreshAsync();
     }
 
     public async Task RefreshAsync()
     {
-        if (!await _refreshGate.WaitAsync(0)) return;
+        if (_disposed || !await _refreshGate.WaitAsync(0)) return;
         try
         {
+            if (_disposed) return;
             var state = await _client.GetStateAsync();
+            if (_disposed) return;
             _isApplyingState = true;
             foreach (var channel in state.Channels)
             {
@@ -90,9 +249,16 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
             Connected = true;
             Status = state.CanControl ? "Sonar connected" : $"{state.Mode} mode";
             StatusDetail = state.CanControl ? "Live · Classic mixer" : "Switch Sonar to Classic mode to make changes";
+            // Sonar does not broadcast preset selection changes on /sock. Refresh only
+            // the five selected IDs (not the 380-item catalogs) while the UI is visible.
+            if (state.CanControl && _presetsLoaded)
+            {
+                try { await RefreshSelectedPresetsAsync(); }
+                catch { /* optional surface; keep core controls live */ }
+            }
             if (state.CanControl && DateTimeOffset.UtcNow >= _nextOptionsRefresh)
             {
-                _nextOptionsRefresh = DateTimeOffset.UtcNow.AddSeconds(30);
+                _nextOptionsRefresh = DateTimeOffset.UtcNow.AddSeconds(OptionsRefreshSeconds);
                 try { await RefreshChannelOptionsAsync(); }
                 catch { StatusDetail = "Live · presets and routing options unavailable"; }
             }
@@ -153,20 +319,57 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         if (!CanControl || !master.IsMaster || !master.Devices.Any(device =>
                 string.Equals(device.Id, deviceId, StringComparison.OrdinalIgnoreCase))) return;
 
-        var failures = new List<string>();
-        foreach (var channelId in PlaybackOutputChannels)
+        // Sonar emits a routing-event burst per channel during a fan-out. Ignore our
+        // own echo while writing, then reconcile once from the authoritative state.
+        _suppressRoutingRefresh = true;
+        _pollTimer.Stop();
+        _nextOptionsRefresh = DateTimeOffset.UtcNow.AddSeconds(OptionsRefreshSeconds);
+
+        var pending = PlaybackOutputChannels
+            .Select(channelId => Channels.FirstOrDefault(candidate => candidate.Id == channelId))
+            .Where(channel => channel is not null &&
+                !string.Equals(channel.SelectedDeviceId, deviceId, StringComparison.OrdinalIgnoreCase))
+            .Select(channel => channel!)
+            .ToArray();
+
+        if (pending.Length == 0)
         {
-            var channel = Channels.FirstOrDefault(candidate => candidate.Id == channelId);
-            if (channel is null || string.Equals(channel.SelectedDeviceId, deviceId, StringComparison.OrdinalIgnoreCase)) continue;
-            try
-            {
-                await _client.SetChannelDeviceAsync(channel.Id, deviceId);
-                channel.SetSelectedDevice(deviceId);
-            }
-            catch { failures.Add(channel.Name); }
+            master.SetSelectedDevice(deviceId);
+            _suppressRoutingRefresh = false;
+            _pollTimer.Start();
+            return;
         }
 
+        // Apply the selection to the UI immediately, the way the SteelSeries mixer does,
+        // then write in the background and roll back only what actually failed.
+        var previous = pending.ToDictionary(channel => channel.Id, channel => channel.SelectedDeviceId);
+        foreach (var channel in pending) channel.SetSelectedDevice(deviceId);
+        master.SetSelectedDevice(deviceId);
+
+        IReadOnlyList<string> failedIds;
+        try
+        {
+            failedIds = _client is SonarClient bulk
+                ? await bulk.SetChannelDevicesAsync(pending.Select(channel => channel.Id), deviceId)
+                : await WriteEachAsync(pending, deviceId);
+        }
+        catch { failedIds = pending.Select(channel => channel.Id).ToArray(); }
+
+        var failures = new List<string>();
+        foreach (var channel in pending)
+        {
+            if (!failedIds.Contains(channel.Id, StringComparer.OrdinalIgnoreCase)) continue;
+            channel.SetSelectedDevice(previous[channel.Id]);
+            failures.Add(channel.Name);
+        }
+
+        _suppressRoutingRefresh = false;
+        _pollTimer.Start();
         RefreshMasterOutputSelection();
+        // Sonar's own routing/ChatMix events reconcile the final state; the debounced
+        // handler collapses that burst into a single refresh.
+        (_client as SonarClient)?.InvalidateRoutingCache();
+        _ = RefreshRoutingSoonAsync();
         if (failures.Count == 0)
         {
             var deviceName = master.Devices.First(device =>
@@ -177,21 +380,54 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
 
         Status = "Output partially updated";
         StatusDetail = $"Could not update {string.Join(", ", failures)}. Other playback channels were changed.";
+        _nextOptionsRefresh = DateTimeOffset.MinValue;
+    }
+
+    public Task RefreshChannelOptionsForTestAsync() => RefreshChannelOptionsAsync();
+
+    private async Task RefreshSelectedPresetsAsync()
+    {
+        var selected = await _client.GetSelectedPresetIdsAsync();
+        foreach (var channel in Channels.Where(channel => channel.HasChannelOptions))
+        {
+            if (!selected.TryGetValue(channel.Id, out var presetId)) continue;
+            if (presetId is Guid id && !channel.Presets.Any(preset => preset.Id == id))
+            {
+                // A custom preset was created/selected in GG after our initial catalog load.
+                // Refresh only that channel's catalog instead of all 380 preset entries.
+                channel.ApplyPresetCatalog(await _client.GetPresetsAsync(channel.Id));
+            }
+            else channel.SetSelectedPreset(presetId);
+        }
     }
 
     private async Task RefreshChannelOptionsAsync()
     {
         var channels = Channels.Where(channel => channel.HasChannelOptions).ToArray();
+        // A socket event can arrive during startup/shutdown; never treat an empty
+        // channel set as a successfully-loaded preset catalog.
+        if (channels.Length == 0) return;
         var routingTask = _client.GetDeviceRoutingAsync();
-        var presetTasks = channels.ToDictionary(channel => channel.Id, channel => _client.GetPresetsAsync(channel.Id));
-        await Task.WhenAll(presetTasks.Values.Append((Task)routingTask));
+
+        // Preset catalogs are large (hundreds of entries) and effectively static, so only
+        // pull the full list once. Routing is cheap and is what actually changes at runtime.
+        var presetTasks = _presetsLoaded
+            ? null
+            : channels.ToDictionary(channel => channel.Id, channel => _client.GetPresetsAsync(channel.Id));
+
+        if (presetTasks is null) await routingTask;
+        else await Task.WhenAll(presetTasks.Values.Append((Task)routingTask));
+
         var routing = await routingTask;
         foreach (var channel in channels)
         {
             var devices = channel.Id == "chatCapture" ? routing.MicrophoneDevices : routing.OutputDevices;
             routing.ChannelDeviceIds.TryGetValue(channel.Id, out var deviceId);
-            channel.ApplyOptions(await presetTasks[channel.Id], devices, deviceId);
+            var stalled = routing.StalledChannels.Contains(channel.Id);
+            if (presetTasks is null) channel.ApplyRouting(devices, deviceId, stalled);
+            else channel.ApplyOptions(await presetTasks[channel.Id], devices, deviceId, stalled);
         }
+        _presetsLoaded = true;
         var master = Channels.FirstOrDefault(channel => channel.IsMaster);
         master?.ApplyMasterOutputOptions(routing.OutputDevices);
         RefreshMasterOutputSelection();
@@ -248,11 +484,23 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     public event PropertyChangedEventHandler? PropertyChanged;
     public void Dispose()
     {
+        if (_disposed) return;
+        _disposed = true;
         _pollTimer.Stop();
+        _routingDebounce?.Cancel();
+        _routingDebounce?.Dispose();
+        if (_events is not null)
+        {
+            _events.EventReceived -= OnSonarEvent;
+            _events.ConnectionChanged -= OnEventStreamConnectionChanged;
+            _ = _events.DisposeAsync();
+            _events = null;
+        }
         _chatMixDebounce?.Cancel();
         _chatMixDebounce?.Dispose();
         foreach (var channel in Channels) channel.Dispose();
-        _refreshGate.Dispose();
+        // Do not dispose _refreshGate here: an already-running RefreshAsync owns it
+        // and must still release it safely while shutdown drains.
         if (_client is IDisposable disposable) disposable.Dispose();
     }
 }
@@ -273,6 +521,24 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
     public bool IsMaster => Id.Equals("master", StringComparison.OrdinalIgnoreCase);
     public bool IsMicrophone => Id.Equals("chatCapture", StringComparison.OrdinalIgnoreCase);
     public bool HasChannelOptions => !IsMaster;
+
+    private bool _routeStalled;
+    /// <summary>True when Sonar reports this channel's route is not passing audio.</summary>
+    public bool RouteStalled
+    {
+        get => _routeStalled;
+        internal set
+        {
+            if (_routeStalled == value) return;
+            _routeStalled = value;
+            OnPropertyChanged(nameof(RouteStalled));
+            OnPropertyChanged(nameof(RouteStatusTip));
+        }
+    }
+
+    public string RouteStatusTip => _routeStalled
+        ? $"{Name} {(IsMicrophone ? "input" : "output")} is not running. Sonar is not passing audio on this route."
+        : SelectedDeviceName;
     public string DeviceRoleLabel => Id.Equals("chatCapture", StringComparison.OrdinalIgnoreCase) ? "IN" : "OUT";
     public ObservableCollection<SonarPreset> Presets { get; } = [];
     public ObservableCollection<SonarAudioDevice> Devices { get; } = [];
@@ -333,15 +599,22 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
 
     public Task ToggleMuteAsync() => _owner.ToggleMuteAsync(this);
 
+    internal void ApplyPresetCatalog(SonarPresetCatalog presetCatalog)
+    {
+        Replace(Presets, presetCatalog.Items);
+        SetSelectedPreset(presetCatalog.SelectedId);
+    }
+
     internal void ApplyOptions(
         SonarPresetCatalog presetCatalog,
         IReadOnlyList<SonarAudioDevice> devices,
-        string? selectedDeviceId)
+        string? selectedDeviceId,
+        bool stalled = false)
     {
-        Replace(Presets, presetCatalog.Items);
+        ApplyPresetCatalog(presetCatalog);
         Replace(Devices, devices);
-        SetSelectedPreset(presetCatalog.SelectedId);
         SetSelectedDevice(selectedDeviceId);
+        RouteStalled = stalled;
     }
 
     internal void ApplyMasterOutputOptions(IReadOnlyList<SonarAudioDevice> devices)
@@ -349,6 +622,14 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
         Replace(Devices, devices);
         _masterOutputOptionsLoaded = true;
         OnPropertyChanged(nameof(SelectedDeviceName));
+    }
+
+    /// <summary>Refreshes only device routing, leaving the cached preset catalog intact.</summary>
+    internal void ApplyRouting(IReadOnlyList<SonarAudioDevice> devices, string? selectedDeviceId, bool stalled = false)
+    {
+        Replace(Devices, devices);
+        SetSelectedDevice(selectedDeviceId);
+        RouteStalled = stalled;
     }
 
     internal void SetSelectedPreset(Guid? presetId)
@@ -370,12 +651,33 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
         }
         else if (IsMaster) OnPropertyChanged(nameof(SelectedDeviceId));
         OnPropertyChanged(nameof(SelectedDeviceName));
+        OnPropertyChanged(nameof(RouteStatusTip));
     }
 
     private static void Replace<T>(ObservableCollection<T> target, IEnumerable<T> source)
     {
-        target.Clear();
-        foreach (var item in source) target.Add(item);
+        // Clearing an ObservableCollection raises a Reset, which makes every bound
+        // ComboBox drop its selection and closes an open dropdown. Only mutate when
+        // the contents genuinely changed, and then patch in place.
+        var items = source as IList<T> ?? source.ToList();
+        if (target.Count == items.Count)
+        {
+            var identical = true;
+            for (var i = 0; i < items.Count; i++)
+            {
+                if (EqualityComparer<T>.Default.Equals(target[i], items[i])) continue;
+                identical = false;
+                break;
+            }
+            if (identical) return;
+        }
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            if (i < target.Count) { if (!EqualityComparer<T>.Default.Equals(target[i], items[i])) target[i] = items[i]; }
+            else target.Add(items[i]);
+        }
+        while (target.Count > items.Count) target.RemoveAt(target.Count - 1);
     }
 
     private async Task DebounceVolumeAsync(double value, CancellationTokenSource debounce)

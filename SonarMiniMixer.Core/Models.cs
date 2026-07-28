@@ -37,7 +37,14 @@ public sealed record SonarAudioDevice(
 public sealed record SonarDeviceRouting(
     IReadOnlyList<SonarAudioDevice> OutputDevices,
     IReadOnlyList<SonarAudioDevice> MicrophoneDevices,
-    IReadOnlyDictionary<string, string?> ChannelDeviceIds);
+    IReadOnlyDictionary<string, string?> ChannelDeviceIds,
+    /// <summary>Channels whose Sonar redirection is not currently running (route not passing audio).</summary>
+    IReadOnlySet<string>? StalledChannels = null)
+{
+    /// <summary>Never null, so callers can query without guarding.</summary>
+    public IReadOnlySet<string> StalledChannels { get; init; } =
+        StalledChannels ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+}
 
 public interface ISonarEndpointProvider
 {
@@ -49,6 +56,7 @@ public interface ISonarClient
 {
     Task<MixerState> GetStateAsync(CancellationToken cancellationToken = default);
     Task<SonarPresetCatalog> GetPresetsAsync(string channel, CancellationToken cancellationToken = default);
+    Task<IReadOnlyDictionary<string, Guid?>> GetSelectedPresetIdsAsync(CancellationToken cancellationToken = default);
     Task SelectPresetAsync(string channel, Guid presetId, CancellationToken cancellationToken = default);
     Task<SonarDeviceRouting> GetDeviceRoutingAsync(CancellationToken cancellationToken = default);
     Task SetChannelDeviceAsync(string channel, string deviceId, CancellationToken cancellationToken = default);

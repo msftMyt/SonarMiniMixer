@@ -9,8 +9,10 @@ if (command is "show" or "exit")
     try
     {
         using var pipe = new NamedPipeClientStream(".", "SonarMiniMixer.Command.v1", PipeDirection.Out, PipeOptions.Asynchronous);
-        await pipe.ConnectAsync(1500);
-        await pipe.WriteAsync(Encoding.UTF8.GetBytes(command));
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(2500));
+        await pipe.ConnectAsync(timeout.Token);
+        await pipe.WriteAsync(Encoding.UTF8.GetBytes(command), timeout.Token);
+        await pipe.FlushAsync(timeout.Token);
         Console.WriteLine($"OK {command}");
         return 0;
     }

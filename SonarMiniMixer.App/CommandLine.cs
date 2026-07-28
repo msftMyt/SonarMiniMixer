@@ -12,7 +12,7 @@ internal static class CommandLine
     public static async Task<int> RunAsync(string[] args)
     {
         var command = args[0];
-        if (command is "show" or "exit") return await SendIpcAsync(command);
+        if (command is "show" or "exit") return await SendIpcAsync(command).ConfigureAwait(false);
 
         if (command == "config")
         {
@@ -55,8 +55,10 @@ internal static class CommandLine
         try
         {
             using var pipe = new NamedPipeClientStream(".", App.PipeName, PipeDirection.Out, PipeOptions.Asynchronous);
-            await pipe.ConnectAsync(1500);
-            await pipe.WriteAsync(Encoding.UTF8.GetBytes(command));
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(2500));
+            await pipe.ConnectAsync(timeout.Token).ConfigureAwait(false);
+            await pipe.WriteAsync(Encoding.UTF8.GetBytes(command), timeout.Token).ConfigureAwait(false);
+            await pipe.FlushAsync(timeout.Token).ConfigureAwait(false);
             return 0;
         }
         catch { Console.Error.WriteLine("ERROR: Sonar Mini Mixer is not running."); return 3; }

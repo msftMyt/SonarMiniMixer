@@ -32,6 +32,16 @@ internal static class Program
             ("mute button automation name flips to Unmute when muted", MuteAutomationNameFlipsAsync),
             ("fader renders a groove with an accent level fill", FaderGrooveAndLevelFillAsync),
             ("responsive metrics scale between min, reference, and max", ResponsiveMetricScalingAsync),
+            ("option refresh preserves collections and selection", OptionRefreshIsStableAsync),
+            ("early routing refresh cannot cache an empty preset surface", EarlyRefreshDoesNotPoisonPresetsAsync),
+            ("socket reconnect forces routing refresh", SocketReconnectRefreshesRoutingAsync),
+            ("disposed mixer ignores late socket and refresh callbacks", DisposedMixerIgnoresLateCallbacksAsync),
+            ("visible refresh follows external preset selection without rebuilding catalogs", ExternalPresetSelectionSyncAsync),
+            ("unknown external preset refreshes only its channel catalog", UnknownExternalPresetRefreshesCatalogAsync),
+            ("pushed volume data applies without an HTTP refresh", PushedVolumeAppliesDirectlyAsync),
+            ("hidden mixer stops polling and resyncs on show", IdlePollingIsSuspendedAsync),
+            ("master fan-out issues one write per channel", MasterFanOutIsEfficientAsync),
+            ("master fan-out is optimistic and rolls back failures", MasterFanOutRollsBackAsync),
             ("layout grows and shrinks without clipping", LayoutAdaptsToWindowSizeAsync),
             ("OLED theme uses only a subtle plum backdrop", OledThemeUsesSubtlePlumAsync),
             ("selector chrome renders its current display value", SelectorChromeRendersCurrentValueAsync),
@@ -46,6 +56,7 @@ internal static class Program
             ("failed volume write surfaces an actionable status", FailedVolumeWriteSurfacesStatusAsync),
             ("poll refresh preserves and writes a pending ChatMix edit", PendingChatMixSurvivesRefreshAsync),
             ("mouse wheel changes a focused fader by its small step", MouseWheelChangesFaderAsync),
+            ("never-shown tray exit preserves existing settings", NeverShownExitPreservesSettingsAsync),
             ("compact settings dimensions survive sanitization", CompactSettingsDimensionsAsync),
         };
 
@@ -186,6 +197,255 @@ internal static class Program
 
         var peer = UIElementAutomationPeer.CreatePeerForElement(button)!;
         Equal("Unmute Mic", peer.GetName());
+    }
+
+
+
+    private static async Task IdlePollingIsSuspendedAsync()
+    {
+        var client = new FakeSonarClient(State());
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+
+        // While the tray popup is hidden, Sonar's push socket is the only thing that
+        // should drive state; polling it costs HTTP work no one can see.
+        vm.SetSurfaceVisible(false);
+        var baseline = client.StateReads;
+        vm.PollForTest();
+        vm.PollForTest();
+        Equal(baseline, client.StateReads);
+
+        // Becoming visible must resync immediately so nothing is stale on screen.
+        await vm.SetSurfaceVisibleAsync(true);
+        Equal(true, client.StateReads > baseline, $"reads={client.StateReads} baseline={baseline}");
+
+        var visible = client.StateReads;
+        vm.PollForTest();
+        Equal(true, client.StateReads > visible, "visible mixer should still poll as a safety net");
+    }
+
+    private static async Task PushedVolumeAppliesDirectlyAsync()
+    {
+        var client = new FakeSonarClient(State());
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+        var reads = client.StateReads;
+        var game = vm.Channels.First(channel => channel.Id == "game");
+
+        vm.OnSonarEvent(new SonarEvent(
+            SonarEventKind.VolumesChanged, 0, string.Empty,
+            "{\"masters\":{\"classic\":{\"volume\":1.0,\"muted\":false}}," +
+            "\"devices\":{\"game\":{\"classic\":{\"volume\":0.23,\"muted\":true}}}}"));
+
+        Equal(23d, game.Volume);
+        Equal(true, game.Muted);
+        Equal(reads, client.StateReads);
+    }
+
+    private static async Task UnknownExternalPresetRefreshesCatalogAsync()
+    {
+        var client = new FakeSonarClient(State());
+        var first = new SonarPreset(Guid.Parse("44444444-4444-4444-4444-444444444444"), "Existing", false, 0);
+        var added = new SonarPreset(Guid.Parse("55555555-5555-5555-5555-555555555555"), "Created in GG", false, 0);
+        client.PresetCatalogs["game"] = new SonarPresetCatalog("game", [first], first.Id);
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+        var reads = client.PresetReads;
+
+        client.PresetCatalogs["game"] = new SonarPresetCatalog("game", [first, added], added.Id);
+        await vm.RefreshAsync();
+
+        var game = vm.Channels.First(channel => channel.Id == "game");
+        Equal(added.Id, game.SelectedPresetId);
+        Equal("Created in GG", game.SelectedPresetName);
+        Equal(2, game.Presets.Count);
+        Equal(reads + 1, client.PresetReads);
+    }
+
+    private static async Task ExternalPresetSelectionSyncAsync()
+    {
+        var client = new FakeSonarClient(State());
+        var first = new SonarPreset(Guid.Parse("11111111-1111-1111-1111-111111111111"), "First", false, 0);
+        var second = new SonarPreset(Guid.Parse("22222222-2222-2222-2222-222222222222"), "Second", false, 0);
+        client.PresetCatalogs["game"] = new SonarPresetCatalog("game", [first, second], first.Id);
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+
+        var game = vm.Channels.First(channel => channel.Id == "game");
+        var items = game.Presets.ToArray();
+        Equal(true, items.Length >= 2);
+        var originalCollection = game.Presets;
+        var changed = items.First(item => item.Id != game.SelectedPresetId);
+        client.PresetCatalogs["game"] = new SonarPresetCatalog("game", items, changed.Id);
+
+        await vm.RefreshAsync();
+
+        Equal(changed.Id, game.SelectedPresetId);
+        Equal(true, ReferenceEquals(originalCollection, game.Presets));
+        Equal(items.Length, game.Presets.Count);
+    }
+
+    private static async Task DisposedMixerIgnoresLateCallbacksAsync()
+    {
+        var client = new FakeSonarClient(State());
+        var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+        var reads = client.StateReads;
+        var connected = vm.Connected;
+        vm.Dispose();
+
+        vm.OnEventStreamConnectionChanged(false);
+        vm.OnSonarEvent(new SonarEvent(SonarEventKind.ChatMixChanged, 0.5, "enabled"));
+        await vm.RefreshAsync();
+
+        Equal(connected, vm.Connected);
+        Equal(reads, client.StateReads);
+    }
+
+    private static async Task SocketReconnectRefreshesRoutingAsync()
+    {
+        var client = new FakeSonarClient(State());
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+        var reads = client.RoutingReads;
+
+        vm.OnEventStreamConnectionChanged(false);
+        Equal(false, vm.Connected);
+        Equal("Sonar reconnecting", vm.Status);
+
+        vm.OnEventStreamConnectionChanged(true);
+        await Task.Yield();
+
+        Equal(true, vm.Connected);
+        Equal(true, client.RoutingReads > reads, $"routing reads stayed at {reads}");
+    }
+
+    private static async Task EarlyRefreshDoesNotPoisonPresetsAsync()
+    {
+        var client = new FakeSonarClient(State());
+        var preset = new SonarPreset(Guid.Parse("33333333-3333-3333-3333-333333333333"), "Loaded", false, 0);
+        client.PresetCatalogs["game"] = new SonarPresetCatalog("game", [preset], preset.Id);
+        using var vm = new MixerViewModel(client);
+
+        // Simulates a routing socket event beating the initial state load.
+        await vm.RefreshChannelOptionsForTestAsync();
+        await vm.RefreshAsync();
+
+        var game = vm.Channels.First(channel => channel.Id == "game");
+        Equal(1, game.Presets.Count);
+        Equal(preset.Id, game.SelectedPresetId);
+    }
+
+    private static async Task OptionRefreshIsStableAsync()
+    {
+        var client = new FakeSonarClient(State());
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+
+        var game = vm.Channels.First(c => c.Id == "game");
+        var presetsRef = game.Presets;
+        var devicesRef = game.Devices;
+        var presetCount = game.Presets.Count;
+        var deviceCount = game.Devices.Count;
+
+        var resets = 0;
+        game.Presets.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset) resets++;
+        };
+        game.Devices.CollectionChanged += (_, e) =>
+        {
+            if (e.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset) resets++;
+        };
+
+        var selectedDevice = game.SelectedDeviceId;
+        var selectedPreset = game.SelectedPresetId;
+
+        // Re-applying identical option data must not churn the bound collections,
+        // otherwise an open ComboBox loses its selection every poll.
+        await vm.RefreshChannelOptionsForTestAsync();
+        await vm.RefreshChannelOptionsForTestAsync();
+
+        Equal(0, resets);
+        Equal(true, ReferenceEquals(presetsRef, game.Presets));
+        Equal(true, ReferenceEquals(devicesRef, game.Devices));
+        Equal(presetCount, game.Presets.Count);
+        Equal(deviceCount, game.Devices.Count);
+        Equal(selectedDevice, game.SelectedDeviceId);
+        Equal(selectedPreset, game.SelectedPresetId);
+    }
+
+
+    private static async Task MasterFanOutRollsBackAsync()
+    {
+        var client = new FakeSonarClient(State());
+        var speakers = new SonarAudioDevice("dev-speakers", "Speakers", "render");
+        var headphones = new SonarAudioDevice("dev-headphones", "Headphones", "render");
+        var mic = new SonarAudioDevice("dev-mic", "Headset Mic", "capture");
+        client.Routing = new SonarDeviceRouting([speakers, headphones], [mic],
+            new Dictionary<string, string?>
+            {
+                ["game"] = speakers.Id, ["chatRender"] = speakers.Id,
+                ["media"] = speakers.Id, ["aux"] = speakers.Id, ["chatCapture"] = mic.Id,
+            });
+
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+        var master = vm.Channels.First(c => c.IsMaster);
+
+        // Media cannot be routed; every other channel must still move.
+        client.FailDeviceChannels.Add("media");
+        await vm.SelectMasterOutputAsync(master, headphones.Id);
+
+        Equal(headphones.Id, vm.Channels.First(c => c.Id == "game").SelectedDeviceId);
+        Equal(headphones.Id, vm.Channels.First(c => c.Id == "chatRender").SelectedDeviceId);
+        Equal(headphones.Id, vm.Channels.First(c => c.Id == "aux").SelectedDeviceId);
+        // The failed channel is rolled back rather than left showing a lie.
+        Equal(speakers.Id, vm.Channels.First(c => c.Id == "media").SelectedDeviceId);
+        // Mixed routing means the Master selector shows no single device.
+        Equal(null, master.SelectedDeviceId);
+        Equal(true, vm.StatusDetail.Contains("Media", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static async Task MasterFanOutIsEfficientAsync()
+    {
+        var client = new FakeSonarClient(State());
+        var speakers = new SonarAudioDevice("dev-speakers", "Speakers", "render");
+        var headphones = new SonarAudioDevice("dev-headphones", "Headphones", "render");
+        var mic = new SonarAudioDevice("dev-mic", "Headset Mic", "capture");
+        client.Routing = new SonarDeviceRouting(
+            [speakers, headphones],
+            [mic],
+            new Dictionary<string, string?>
+            {
+                ["game"] = speakers.Id,
+                ["chatRender"] = speakers.Id,
+                ["media"] = speakers.Id,
+                ["aux"] = speakers.Id,
+                ["chatCapture"] = mic.Id,
+            });
+
+        using var vm = new MixerViewModel(client);
+        await vm.RefreshAsync();
+
+        var master = vm.Channels.First(c => c.IsMaster);
+        client.DeviceWrites.Clear();
+        client.RoutingReads = 0;
+
+        await vm.SelectMasterOutputAsync(master, headphones.Id);
+
+        // Exactly one write per playback channel, and Mic is never touched.
+        Equal(4, client.DeviceWrites.Count);
+        Equal(false, client.DeviceWrites.Any(w => w.Channel == "chatCapture"));
+        Equal(true, client.DeviceWrites.All(w => w.Device == headphones.Id));
+        Equal(headphones.Id, master.SelectedDeviceId);
+        foreach (var id in new[] { "game", "chatRender", "media", "aux" })
+            Equal(headphones.Id, vm.Channels.First(c => c.Id == id).SelectedDeviceId);
+
+        // Re-selecting the same device is a no-op rather than four redundant writes.
+        client.DeviceWrites.Clear();
+        await vm.SelectMasterOutputAsync(master, headphones.Id);
+        Equal(0, client.DeviceWrites.Count);
     }
 
     private static Task ResponsiveMetricScalingAsync()
@@ -468,6 +728,24 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static Task NeverShownExitPreservesSettingsAsync()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "SonarMiniMixerAppTests", Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(root, "settings.json");
+        var store = new SettingsStore(path);
+        var expected = new AppSettings(true, true, 900, 500, 44, 55);
+        store.SaveAsync(expected).GetAwaiter().GetResult();
+        var vm = new MixerViewModel(new FakeSonarClient(State()));
+        var window = new MainWindow(vm, store);
+
+        // Exit without ever showing/loading the window.
+        window.ExitApplication();
+
+        Equal(expected, store.LoadAsync().GetAwaiter().GetResult());
+        if (Directory.Exists(root)) Directory.Delete(root, true);
+        return Task.CompletedTask;
+    }
+
     private static async Task CompactSettingsDimensionsAsync()
     {
         var root = Path.Combine(Path.GetTempPath(), "SonarMiniMixerAppTests", Guid.NewGuid().ToString("N"));
@@ -594,12 +872,32 @@ internal static class Program
         public List<(string Channel, string Device)> DeviceWrites { get; } = [];
         public HashSet<string> FailDeviceChannels { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        public Task<MixerState> GetStateAsync(CancellationToken cancellationToken = default) => Task.FromResult(State);
+        public int StateReads { get; private set; }
 
-        public Task<SonarPresetCatalog> GetPresetsAsync(string channel, CancellationToken cancellationToken = default) =>
-            FailOptionReads
+        public Task<MixerState> GetStateAsync(CancellationToken cancellationToken = default)
+        {
+            StateReads++;
+            return Task.FromResult(State);
+        }
+
+        public int PresetReads { get; private set; }
+
+        public Task<SonarPresetCatalog> GetPresetsAsync(string channel, CancellationToken cancellationToken = default)
+        {
+            PresetReads++;
+            return FailOptionReads
                 ? Task.FromException<SonarPresetCatalog>(new InvalidOperationException("options unavailable"))
                 : Task.FromResult(PresetCatalogs.TryGetValue(channel, out var catalog) ? catalog : new SonarPresetCatalog(channel, [], null));
+        }
+
+        public Task<IReadOnlyDictionary<string, Guid?>> GetSelectedPresetIdsAsync(CancellationToken cancellationToken = default)
+        {
+            if (FailOptionReads)
+                return Task.FromException<IReadOnlyDictionary<string, Guid?>>(new InvalidOperationException("options unavailable"));
+            IReadOnlyDictionary<string, Guid?> selected = PresetCatalogs.ToDictionary(
+                pair => pair.Key, pair => pair.Value.SelectedId, StringComparer.OrdinalIgnoreCase);
+            return Task.FromResult(selected);
+        }
 
         public Task SelectPresetAsync(string channel, Guid presetId, CancellationToken cancellationToken = default)
         {
@@ -607,10 +905,15 @@ internal static class Program
             return Task.CompletedTask;
         }
 
-        public Task<SonarDeviceRouting> GetDeviceRoutingAsync(CancellationToken cancellationToken = default) =>
-            FailOptionReads
+        public int RoutingReads { get; set; }
+
+        public Task<SonarDeviceRouting> GetDeviceRoutingAsync(CancellationToken cancellationToken = default)
+        {
+            RoutingReads++;
+            return FailOptionReads
                 ? Task.FromException<SonarDeviceRouting>(new InvalidOperationException("options unavailable"))
                 : Task.FromResult(Routing);
+        }
 
         public Task SetChannelDeviceAsync(string channel, string deviceId, CancellationToken cancellationToken = default)
         {

@@ -379,10 +379,34 @@
                 <RowDefinition Height="{Binding ActualHeight, ElementName=RootChrome, Converter={StaticResource Responsive}, ConverterParameter='38,40,46'}"/>
               </Grid.RowDefinitions>
               <Border Grid.Row="0" Height="3" Background="{Binding Accent}" CornerRadius="0,0,2,2"/>
-              <TextBlock Grid.Row="1" Text="{Binding Name}" Foreground="{StaticResource TextBrush}"
-                         FontFamily="Segoe UI Variable Display, Segoe UI" FontWeight="SemiBold"
-                         FontSize="{Binding ActualHeight, ElementName=RootChrome, Converter={StaticResource Responsive}, ConverterParameter='13,14,16.5'}"
-                         HorizontalAlignment="Center" VerticalAlignment="Center"/>
+              <!-- Sonar reports this route as not running. Colour alone is unreadable
+                   against a channel's own accent, so show an explicit warning badge. -->
+              <Border Grid.Row="0" Height="3" Background="{StaticResource DangerBrush}" CornerRadius="0,0,2,2"
+                      Visibility="{Binding RouteStalled, Converter={StaticResource BoolVisibility}}"/>
+              <StackPanel Grid.Row="1" Orientation="Horizontal"
+                          HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Border Background="{StaticResource DangerBrush}" CornerRadius="3" Padding="4,0" Margin="0,0,5,0"
+                        VerticalAlignment="Center"
+                        Visibility="{Binding RouteStalled, Converter={StaticResource BoolVisibility}}"
+                        ToolTip="{Binding RouteStatusTip}">
+                  <TextBlock Text="!" Foreground="White" FontFamily="Segoe UI, Segoe UI Variable Display"
+                             FontSize="10" FontWeight="Bold" VerticalAlignment="Center"/>
+                </Border>
+                <TextBlock Text="{Binding Name}" FontFamily="Segoe UI Variable Display, Segoe UI" FontWeight="SemiBold"
+                           FontSize="{Binding ActualHeight, ElementName=RootChrome, Converter={StaticResource Responsive}, ConverterParameter='13,14,16.5'}"
+                           VerticalAlignment="Center">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                      <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding RouteStalled}" Value="True">
+                          <Setter Property="Foreground" Value="{StaticResource DangerBrush}"/>
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
+              </StackPanel>
               <StackPanel Grid.Row="2" Margin="1,0,1,5" VerticalAlignment="Bottom"
                           Visibility="{Binding HasChannelOptions, Converter={StaticResource BoolVisibility}}">
                 <TextBlock Text="EQ PRESET" Foreground="{StaticResource DimTextBrush}" FontFamily="Segoe UI Semibold, Segoe UI" FontSize="9.5" FontWeight="SemiBold"
@@ -399,7 +423,7 @@
                          FontFamily="Segoe UI Semibold, Segoe UI" FontSize="9.5" FontWeight="SemiBold"
                          HorizontalAlignment="Center" VerticalAlignment="Center"
                          Visibility="{Binding IsMaster, Converter={StaticResource BoolVisibility}}"/>
-              <Slider Grid.Row="3" Style="{StaticResource VerticalFader}" MaxHeight="{Binding ActualHeight, ElementName=RootChrome, Converter={StaticResource Responsive}, ConverterParameter='140,175,205'}"
+              <Slider Grid.Row="3" Style="{StaticResource VerticalFader}" MaxHeight="{Binding ActualHeight, ElementName=RootChrome, Converter={StaticResource Responsive}, ConverterParameter='140,175,240'}"
                       Value="{Binding Volume, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                       AutomationProperties.Name="{Binding Name, StringFormat={}{0} volume}"
                       AutomationProperties.HelpText="Use arrow keys to change volume" HorizontalAlignment="Center"/>
@@ -422,9 +446,9 @@
                           DisplayMemberPath="Name" SelectedValuePath="Id"
                           Tag="{Binding SelectedDeviceName}"
                           SelectedValue="{Binding SelectedDeviceId, Mode=OneWay}" SelectionChanged="Device_SelectionChanged"
-                          ToolTip="{Binding SelectedDeviceName}"
+                          ToolTip="{Binding RouteStatusTip}"
                           AutomationProperties.Name="{Binding Name, StringFormat={}{0} physical device}"
-                          AutomationProperties.HelpText="{Binding SelectedDeviceName}"/>
+                          AutomationProperties.HelpText="{Binding RouteStatusTip}"/>
               </StackPanel>
               <StackPanel Grid.Row="6" Margin="1,5,1,0" VerticalAlignment="Top"
                           Visibility="{Binding IsMaster, Converter={StaticResource BoolVisibility}}">

@@ -2,6 +2,23 @@
 
 All notable changes to Sonar Mini Mixer are documented here. This project follows [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- **Push-first synchronization.** Sonar's local `/sock` WebSocket now drives volume, mute, ChatMix, routing, fallback-device, and reconnect updates; visible polling is only a safety net and hidden tray mode does not poll.
+- **Lightweight hidden startup.** The tray and IPC server start without constructing the WPF mixer, Sonar clients, or audio endpoint inventory until the mixer is first opened.
+- **Fast, restart-safe Core Audio writes.** The app caches only Sonar endpoint IDs and opens a fresh short-lived `MMDevice` handle per write. This avoids stale COM handles while reducing measured channel writes from roughly 206 ms to 1–2 ms.
+
+### Fixed
+
+- Current GG compatibility: ChatMix is discovered at `/v1/chatMix` with legacy fallback and re-discovery after GG changes endpoint shape.
+- Sonar restart recovery now waits through GG's transient empty-address startup state, reconnects the event socket on the UI dispatcher, and immediately rebuilds routing/options.
+- External GG volume/mute changes apply directly from `SONAR_EVENT_VOLUME_DATA`; selected EQ presets refresh without re-downloading all preset catalogs, including newly created custom presets.
+- Duplicate launches no longer deadlock WPF startup or hang on an unbounded named-pipe write; a shutdown/start race can take over the released mutex safely.
+- Exiting from the tray before ever opening the mixer no longer overwrites saved window size, pin, or position with defaults.
+- Dead Sonar routes (`isRunning=false`) display an explicit red warning instead of appearing healthy.
+
 ## [1.1.1] - 2026-07-26
 
 ### Changed

@@ -4,6 +4,8 @@ namespace SonarMiniMixer.Core;
 
 public sealed class SteelSeriesEndpointProvider : ISonarEndpointProvider, IDisposable
 {
+    private const int SonarAddressAttempts = 21;
+    private static readonly TimeSpan SonarAddressRetryDelay = TimeSpan.FromMilliseconds(250);
     public static string DefaultCorePropsPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData),
         "SteelSeries", "SteelSeries Engine 3", "coreProps.json");
@@ -41,13 +43,31 @@ public sealed class SteelSeriesEndpointProvider : ISonarEndpointProvider, IDispo
             using var coreDocument = JsonDocument.Parse(await File.ReadAllTextAsync(_corePropsPath, cancellationToken));
             var ggAddress = coreDocument.RootElement.GetProperty("ggEncryptedAddress").GetString();
             var ggBaseUri = EndpointSecurity.CreateLoopbackBaseUri(ggAddress, "https");
-            using var response = await _http.GetAsync(new Uri(ggBaseUri, "subApps"), cancellationToken);
-            response.EnsureSuccessStatusCode();
-            using var subApps = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
-            var sonarAddress = subApps.RootElement.GetProperty("subApps").GetProperty("sonar")
-                .GetProperty("metadata").GetProperty("webServerAddress").GetString();
-            _cached = EndpointSecurity.CreateLoopbackBaseUri(sonarAddress, "http");
-            return _cached;
+
+            // GG creates the Sonar process before its web server address is ready. During
+            // that short window subApps reports isRunning=true with empty addresses; retry
+            // instead of turning a normal restart into a hard connection failure.
+            for (var attempt = 0; attempt < SonarAddressAttempts; attempt++)
+            {
+                using var response = await _http.GetAsync(new Uri(ggBaseUri, "subApps"), cancellationToken);
+                response.EnsureSuccessStatusCode();
+                using var subApps = JsonDocument.Parse(await response.Content.ReadAsStringAsync(cancellationToken));
+                var metadata = subApps.RootElement.GetProperty("subApps").GetProperty("sonar").GetProperty("metadata");
+                var plain = metadata.TryGetProperty("webServerAddress", out var plainElement) ? plainElement.GetString() : null;
+                var encrypted = metadata.TryGetProperty("encryptedWebServerAddress", out var encryptedElement) ? encryptedElement.GetString() : null;
+                if (!string.IsNullOrWhiteSpace(plain))
+                {
+                    _cached = EndpointSecurity.CreateLoopbackBaseUri(plain, "http");
+                    return _cached;
+                }
+                if (!string.IsNullOrWhiteSpace(encrypted))
+                {
+                    _cached = EndpointSecurity.CreateLoopbackBaseUri(encrypted, "https");
+                    return _cached;
+                }
+                if (attempt < SonarAddressAttempts - 1) await Task.Delay(SonarAddressRetryDelay, cancellationToken);
+            }
+            throw new SonarConnectionException("SteelSeries Sonar is still starting.");
         }
         catch (SonarConnectionException) { throw; }
         catch (Exception exception) when (exception is IOException or JsonException or InvalidOperationException or HttpRequestException)
