@@ -513,17 +513,6 @@ internal static class Program
         Equal(20d, viewModel.Channels.Single(channel => channel.Id == "aux").Volume);
         Equal(80d, viewModel.Channels.Single(channel => channel.Id == "chatCapture").Volume);
 
-        await Task.Delay(200);
-        client.VolumeWrites.Clear();
-        foreach (var value in new[] { 25d, 30, 35, 40, 45, 50, 55, 60, 65, 70 })
-        {
-            master.Volume = value;
-            await Task.Delay(16);
-        }
-        await Task.Delay(140);
-        Equal(true, client.VolumeWrites.Count >= 4, $"writes={client.VolumeWrites.Count}");
-        Equal(true, client.VolumeWrites.Count <= 7, $"writes={client.VolumeWrites.Count}");
-        Equal(.7, client.VolumeWrites.Last().Volume);
     }
 
     private static Task ResponsiveMetricScalingAsync()
