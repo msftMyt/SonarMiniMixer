@@ -1,7 +1,7 @@
 <Project>
 
   <PropertyGroup>
-    <Version>1.1.1</Version>
+    <Version>1.1.2</Version>
     <Product>Sonar Mini Mixer</Product>
     <Company>Sonar Mini Mixer contributors</Company>
     <Copyright>Copyright (c) Sonar Mini Mixer contributors</Copyright>

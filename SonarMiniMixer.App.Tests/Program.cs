@@ -39,9 +39,11 @@ internal static class Program
             ("visible refresh follows external preset selection without rebuilding catalogs", ExternalPresetSelectionSyncAsync),
             ("unknown external preset refreshes only its channel catalog", UnknownExternalPresetRefreshesCatalogAsync),
             ("pushed volume data applies without an HTTP refresh", PushedVolumeAppliesDirectlyAsync),
+
             ("hidden mixer stops polling and resyncs on show", IdlePollingIsSuspendedAsync),
             ("master fan-out issues one write per channel", MasterFanOutIsEfficientAsync),
             ("master fan-out is optimistic and rolls back failures", MasterFanOutRollsBackAsync),
+            ("Master drag mirrors GG ratios and throttled native writes", MasterDragMirrorsGgAsync),
             ("layout grows and shrinks without clipping", LayoutAdaptsToWindowSizeAsync),
             ("OLED theme uses only a subtle plum backdrop", OledThemeUsesSubtlePlumAsync),
             ("selector chrome renders its current display value", SelectorChromeRendersCurrentValueAsync),
@@ -241,6 +243,7 @@ internal static class Program
         Equal(true, game.Muted);
         Equal(reads, client.StateReads);
     }
+
 
     private static async Task UnknownExternalPresetRefreshesCatalogAsync()
     {
@@ -446,6 +449,81 @@ internal static class Program
         client.DeviceWrites.Clear();
         await vm.SelectMasterOutputAsync(master, headphones.Id);
         Equal(0, client.DeviceWrites.Count);
+    }
+
+    private static async Task MasterDragMirrorsGgAsync()
+    {
+        var state = new MixerState(
+            "classic",
+            [
+                new MixerChannel("master", "Master", 1, false, "#786CFF", 0),
+                new MixerChannel("game", "Game", .4, false, "#48F27A", 10),
+                new MixerChannel("chatRender", "Chat", .6, false, "#44D7F4", 20),
+                new MixerChannel("media", "Media", .7, false, "#FF5EBB", 30),
+                new MixerChannel("aux", "Aux", .3, false, "#B870FF", 40),
+                new MixerChannel("chatCapture", "Mic", .8, false, "#FFB35C", 50),
+            ],
+            0,
+            "enabled");
+        var client = new FakeSonarClient(state);
+        client.VolumeWriteDelay = TimeSpan.FromMilliseconds(50);
+        using var viewModel = new MixerViewModel(client);
+        await viewModel.RefreshAsync();
+        var master = viewModel.Channels.Single(channel => channel.IsMaster);
+
+        master.Volume = 80;
+        Equal(32d, viewModel.Channels.Single(channel => channel.Id == "game").Volume);
+        Equal(48d, viewModel.Channels.Single(channel => channel.Id == "chatRender").Volume);
+        Equal(56d, viewModel.Channels.Single(channel => channel.Id == "media").Volume);
+        Equal(24d, viewModel.Channels.Single(channel => channel.Id == "aux").Volume);
+        Equal(80d, viewModel.Channels.Single(channel => channel.Id == "chatCapture").Volume);
+        await viewModel.RefreshAsync();
+        Equal(32d, viewModel.Channels.Single(channel => channel.Id == "game").Volume);
+        Equal(48d, viewModel.Channels.Single(channel => channel.Id == "chatRender").Volume);
+        await Task.Delay(30);
+        Equal(1, client.VolumeWrites.Count);
+        Equal(("master", .8), client.VolumeWrites[0]);
+
+        master.Volume = 70;
+        await Task.Delay(10);
+        master.Volume = 60;
+        await Task.Delay(10);
+        master.Volume = 50;
+        await Task.Delay(280);
+
+        Equal(.5, client.VolumeWrites.Last().Volume);
+        Equal(true, client.VolumeWrites.Count <= 3, $"writes={client.VolumeWrites.Count}");
+        Equal(true, client.VolumeWrites.All(write => write.Channel == "master"));
+        var writeGaps = client.VolumeWriteTimes.Zip(client.VolumeWriteTimes.Skip(1), (first, second) => second - first).ToArray();
+        Equal(true, writeGaps.All(gap => gap <= TimeSpan.FromMilliseconds(105)),
+            $"gaps=[{string.Join(',', writeGaps.Select(gap => gap.TotalMilliseconds.ToString("0.0")))}]");
+        Equal(0, client.MuteWrites.Count);
+        Equal(20d, viewModel.Channels.Single(channel => channel.Id == "game").Volume);
+        Equal(30d, viewModel.Channels.Single(channel => channel.Id == "chatRender").Volume);
+        Equal(35d, viewModel.Channels.Single(channel => channel.Id == "media").Volume);
+        Equal(15d, viewModel.Channels.Single(channel => channel.Id == "aux").Volume);
+        Equal(80d, viewModel.Channels.Single(channel => channel.Id == "chatCapture").Volume);
+
+        await Task.Delay(170);
+        master.Volume = 0;
+        master.Volume = 20;
+        Equal(20d, viewModel.Channels.Single(channel => channel.Id == "game").Volume);
+        Equal(20d, viewModel.Channels.Single(channel => channel.Id == "chatRender").Volume);
+        Equal(20d, viewModel.Channels.Single(channel => channel.Id == "media").Volume);
+        Equal(20d, viewModel.Channels.Single(channel => channel.Id == "aux").Volume);
+        Equal(80d, viewModel.Channels.Single(channel => channel.Id == "chatCapture").Volume);
+
+        await Task.Delay(200);
+        client.VolumeWrites.Clear();
+        foreach (var value in new[] { 25d, 30, 35, 40, 45, 50, 55, 60, 65, 70 })
+        {
+            master.Volume = value;
+            await Task.Delay(16);
+        }
+        await Task.Delay(140);
+        Equal(true, client.VolumeWrites.Count >= 4, $"writes={client.VolumeWrites.Count}");
+        Equal(true, client.VolumeWrites.Count <= 7, $"writes={client.VolumeWrites.Count}");
+        Equal(.7, client.VolumeWrites.Last().Volume);
     }
 
     private static Task ResponsiveMetricScalingAsync()
@@ -863,8 +941,12 @@ internal static class Program
     {
         public MixerState State { get; set; } = state;
         public bool FailVolumeWrites { get; set; }
+        public TimeSpan VolumeWriteDelay { get; set; }
         public bool FailOptionReads { get; set; }
         public List<(string Channel, double Volume)> VolumeWrites { get; } = [];
+        public List<TimeSpan> VolumeWriteTimes { get; } = [];
+        private readonly System.Diagnostics.Stopwatch _volumeWriteWatch = System.Diagnostics.Stopwatch.StartNew();
+        public List<(string Channel, bool Muted)> MuteWrites { get; } = [];
         public List<double> ChatMixWrites { get; } = [];
         public Dictionary<string, SonarPresetCatalog> PresetCatalogs { get; } = new(StringComparer.OrdinalIgnoreCase);
         public SonarDeviceRouting Routing { get; set; } = new([], [], new Dictionary<string, string?>());
@@ -922,14 +1004,19 @@ internal static class Program
             return Task.CompletedTask;
         }
 
-        public Task SetVolumeAsync(string channel, double volume, CancellationToken cancellationToken = default)
+        public async Task SetVolumeAsync(string channel, double volume, CancellationToken cancellationToken = default)
         {
             if (FailVolumeWrites) throw new InvalidOperationException("rejected");
+            VolumeWriteTimes.Add(_volumeWriteWatch.Elapsed);
             VolumeWrites.Add((channel, volume));
-            return Task.CompletedTask;
+            if (VolumeWriteDelay > TimeSpan.Zero) await Task.Delay(VolumeWriteDelay, cancellationToken);
         }
 
-        public Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default)
+        {
+            MuteWrites.Add((channel, muted));
+            return Task.CompletedTask;
+        }
 
         public Task SetChatMixAsync(double balance, CancellationToken cancellationToken = default)
         {

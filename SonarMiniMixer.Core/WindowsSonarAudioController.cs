@@ -59,6 +59,7 @@ public sealed class WindowsSonarAudioController : ISonarAudioController
         return Task.CompletedTask;
     }
 
+
     public Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();

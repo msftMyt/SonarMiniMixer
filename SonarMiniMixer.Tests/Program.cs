@@ -75,7 +75,9 @@ var tests = new (string Name, Func<Task> Run)[]
         await client.SetVolumeAsync("master", 0.8);
         Contains(audio.Writes, "VOLUME game 0.75");
         Contains(audio.Writes, "MUTE chatRender true");
-        Contains(audio.Writes, "VOLUME master 0.8");
+        // Master commits over HTTP only; it must never touch Core Audio endpoints.
+        Equal(false, audio.Writes.Any(write => write.StartsWith("VOLUME master", StringComparison.Ordinal)));
+        Equal(1, audio.Writes.Count(write => write.StartsWith("VOLUME game", StringComparison.Ordinal)));
         Equal(true, handler.Requests.Contains("PUT /volumeSettings/classic/master/Volume/0.8"));
         Equal(false, handler.Requests.Any(x => x.StartsWith("PUT /volumeSettings/classic/game", StringComparison.Ordinal)));
     }),
@@ -128,6 +130,45 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal(2, routing.StalledChannels.Count);
     }),
 
+    ("master HTTP write never rescales playback channels", async () =>
+    {
+        // After Sonar commits master=.5, its effective channel values are .2/.3/.35/.15.
+        // GG must receive a master action, but no Core Audio endpoint may be touched:
+        // a master endpoint nudge rescales all channels against the loudest one.
+        var master = 1.0;
+        var values = new Dictionary<string, double>
+        {
+            ["game"] = .4, ["chatRender"] = .6, ["media"] = .7, ["aux"] = .3, ["chatCapture"] = 1,
+        };
+        string Volumes() =>
+            "{\"masters\":{\"classic\":{\"volume\":" + master.ToString(CultureInfo.InvariantCulture) + ",\"muted\":false}},\"devices\":{" +
+            string.Join(",", values.Select(pair => "\"" + pair.Key + "\":{\"classic\":{\"volume\":" + pair.Value.ToString(CultureInfo.InvariantCulture) + ",\"muted\":false}}")) + "}}";
+        var handler = new RecordingHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (request.Method == HttpMethod.Put && path.Equals("/volumeSettings/classic/master/Volume/0.5", StringComparison.OrdinalIgnoreCase))
+            {
+                master = .5;
+                values["game"] = .2; values["chatRender"] = .3; values["media"] = .35; values["aux"] = .15;
+                return Json(Volumes());
+            }
+            return path switch
+            {
+                "/volumeSettings/classic" => Json(Volumes()),
+                "/mode/" => Json("\"classic\""),
+                "/v1/chatMix" => Json("{\"balance\":0,\"state\":\"enabled\"}"),
+                _ => new HttpResponseMessage(HttpStatusCode.NoContent)
+            };
+        });
+        var audio = new RecordingAudioController();
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
+
+        await client.SetVolumeAsync("master", .5);
+
+        Contains(handler.Requests, "PUT /volumeSettings/classic/master/Volume/0.5");
+        Equal(0, audio.Writes.Count);
+    }),
+
     ("mixer mirrors Sonar values exactly", async () =>
     {
         // The mixer is a remote control for GG: what Sonar stores is what we show,
@@ -151,7 +192,8 @@ var tests = new (string Name, Func<Task> Run)[]
                 _ => new HttpResponseMessage(HttpStatusCode.NoContent)
             };
         });
-        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, new RecordingAudioController());
+        var audio = new RecordingAudioController();
+        using var client = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
 
         // Displayed values are Sonar's values, untouched.
         var state = await client.GetStateAsync();
@@ -159,17 +201,16 @@ var tests = new (string Name, Func<Task> Run)[]
         Equal(0.5, Math.Round(state.Channels.First(c => c.Id == "master").Volume, 4));
 
         // Values go out verbatim: no scaling applied on the way to Sonar.
-        var audio = new RecordingAudioController();
-        using var writer = new SonarClient(new FixedEndpointProvider("http://127.0.0.1:64707/"), handler, audio);
-        await writer.SetVolumeAsync("game", 0.6);
+        await client.SetVolumeAsync("game", 0.6);
         Contains(audio.Writes, "VOLUME game 0.6");
-        // Master commits over HTTP, then nudges Core Audio so Sonar broadcasts it.
-        await writer.SetVolumeAsync("master", 0.75);
-        Contains(audio.Writes, "VOLUME master 0.75");
+        // Master commits over HTTP without rescaling any endpoint.
+        await client.SetVolumeAsync("master", 0.75);
+        Equal(false, audio.Writes.Any(write => write.StartsWith("VOLUME master", StringComparison.Ordinal)));
+        Equal(1, audio.Writes.Count(write => write.StartsWith("VOLUME game", StringComparison.Ordinal)));
 
         // Reading a value and writing it straight back must not shift it.
-        var echoed = (await writer.GetStateAsync()).Channels.First(c => c.Id == "game").Volume;
-        await writer.SetVolumeAsync("game", echoed);
+        var echoed = (await client.GetStateAsync()).Channels.First(c => c.Id == "game").Volume;
+        await client.SetVolumeAsync("game", echoed);
         Contains(audio.Writes, "VOLUME game 0.4");
     }),
 
@@ -527,6 +568,7 @@ sealed class RecordingAudioController : ISonarAudioController
         Writes.Add($"VOLUME {channel} {volume.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
         return Task.CompletedTask;
     }
+
     public Task SetMuteAsync(string channel, bool muted, CancellationToken cancellationToken = default)
     {
         Writes.Add($"MUTE {channel} {muted.ToString().ToLowerInvariant()}");

@@ -223,8 +223,7 @@ public sealed class SonarClient : ISonarClient, IDisposable
             throw new SonarConnectionException($"Sonar channel '{channel}' is not controllable in the current mode.");
 
         // The two levels need different transports:
-        //  - channels: Core Audio, the only path that raises SONAR_EVENT_VOLUME_DATA
-        //    so GG's mixer redraws (the HTTP route changes state silently).
+        //  - channels: Core Audio, which raises SONAR_EVENT_VOLUME_DATA.
         //  - master: the HTTP master route, because a Core Audio write on the master
         //    endpoint rescales the channels without moving Sonar's master value.
         if (channel.Equals("master", StringComparison.OrdinalIgnoreCase))
@@ -232,11 +231,9 @@ public sealed class SonarClient : ISonarClient, IDisposable
             await PutAsync(
                 $"volumeSettings/classic/master/Volume/{volume.ToString("0.######", CultureInfo.InvariantCulture)}",
                 cancellationToken);
-            // The HTTP route stores the value but broadcasts nothing, so nudge the
-            // master endpoint through Core Audio to make Sonar publish the update
-            // and GG redraw. The nudge cannot change the stored master value.
-            try { await _audio.SetVolumeAsync("master", volume, cancellationToken); }
-            catch { /* notification only; the value is already committed */ }
+            // This is Sonar's canonical Master route. Do not follow it with a Core
+            // Audio master nudge: that rescales playback endpoints against their
+            // loudest sibling and corrupts the proportional mix.
         }
         else
             await _audio.SetVolumeAsync(channel, volume, cancellationToken);

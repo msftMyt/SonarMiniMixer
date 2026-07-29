@@ -28,6 +28,12 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
     private bool _suppressRoutingRefresh;
     private bool _surfaceVisible = true;
     private bool _disposed;
+    private readonly object _masterWriteLock = new();
+    private Dictionary<string, double>? _masterRatios;
+    private CancellationTokenSource? _masterGestureSettle;
+    private double? _pendingMasterPercent;
+    private bool _masterWriterRunning;
+    private static readonly TimeSpan MasterWriteInterval = TimeSpan.FromMilliseconds(80);
 
     public ObservableCollection<ChannelViewModel> Channels { get; } = [];
     public string Status { get => _status; private set => Set(ref _status, value); }
@@ -280,6 +286,100 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         return _client.SetVolumeAsync(channel.Id, Math.Clamp(percent / 100, 0, 1));
     }
 
+    internal void SetMasterVolume(ChannelViewModel master, double previousPercent, double percent)
+    {
+        if (!CanControl || !master.IsMaster) return;
+
+        if (_masterRatios is null)
+        {
+            _masterRatios = PlaybackOutputChannels.ToDictionary(
+                id => id,
+                id => previousPercent == 0
+                    ? 1
+                    : (Channels.FirstOrDefault(channel => channel.Id == id)?.Volume ?? 0) / previousPercent,
+                StringComparer.OrdinalIgnoreCase);
+        }
+        if (percent == 0)
+            foreach (var id in PlaybackOutputChannels) _masterRatios[id] = 1;
+
+        foreach (var id in PlaybackOutputChannels)
+        {
+            var channel = Channels.FirstOrDefault(candidate => candidate.Id == id);
+            if (channel is not null)
+                channel.ApplyMasterVolume(Math.Clamp(_masterRatios[id] * percent, 0, 100));
+        }
+
+        QueueMasterWrite(percent);
+        _masterGestureSettle?.Cancel();
+        _masterGestureSettle?.Dispose();
+        var settle = new CancellationTokenSource();
+        _masterGestureSettle = settle;
+        _ = SettleMasterGestureAsync(settle);
+    }
+
+    private void QueueMasterWrite(double percent)
+    {
+        var start = false;
+        lock (_masterWriteLock)
+        {
+            _pendingMasterPercent = percent;
+            if (!_masterWriterRunning)
+            {
+                _masterWriterRunning = true;
+                start = true;
+            }
+        }
+        if (start) _ = RunMasterWriterAsync();
+    }
+
+    private async Task RunMasterWriterAsync()
+    {
+        while (!_disposed)
+        {
+            double percent;
+            lock (_masterWriteLock)
+            {
+                if (_pendingMasterPercent is not double next)
+                {
+                    _masterWriterRunning = false;
+                    return;
+                }
+                percent = next;
+                _pendingMasterPercent = null;
+            }
+
+            var interval = System.Diagnostics.Stopwatch.StartNew();
+            try { await _client.SetVolumeAsync("master", Math.Clamp(percent / 100, 0, 1)); }
+            catch
+            {
+                lock (_masterWriteLock)
+                {
+                    _pendingMasterPercent = null;
+                    _masterWriterRunning = false;
+                }
+                await RecoverFromWriteFailureAsync("Master volume");
+                return;
+            }
+            var remaining = MasterWriteInterval - interval.Elapsed;
+            if (remaining > TimeSpan.Zero) await Task.Delay(remaining);
+        }
+    }
+
+    private async Task SettleMasterGestureAsync(CancellationTokenSource settle)
+    {
+        try { await Task.Delay(140, settle.Token); }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(_masterGestureSettle, settle))
+            {
+                _masterGestureSettle = null;
+                _masterRatios = null;
+            }
+            settle.Dispose();
+        }
+    }
+
     internal async Task ToggleMuteAsync(ChannelViewModel channel)
     {
         if (!CanControl) return;
@@ -498,6 +598,9 @@ public sealed class MixerViewModel : INotifyPropertyChanged, IDisposable
         }
         _chatMixDebounce?.Cancel();
         _chatMixDebounce?.Dispose();
+        _masterGestureSettle?.Cancel();
+        _masterGestureSettle?.Dispose();
+        lock (_masterWriteLock) _pendingMasterPercent = null;
         foreach (var channel in Channels) channel.Dispose();
         // Do not dispose _refreshGate here: an already-running RefreshAsync owns it
         // and must still release it safely while shutdown drains.
@@ -554,8 +657,15 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
         set
         {
             if (!_owner.CanControl) return;
+            var previous = _volume;
             if (!Set(ref _volume, value)) return;
             OnPropertyChanged(nameof(VolumeText));
+            if (IsMaster)
+            {
+                HoldVolumeEditOpen();
+                _owner.SetMasterVolume(this, previous, value);
+                return;
+            }
             _volumeDebounce?.Cancel();
             var debounce = new CancellationTokenSource();
             _volumeDebounce = debounce;
@@ -595,6 +705,15 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
         OnPropertyChanged(nameof(Muted));
         OnPropertyChanged(nameof(MuteGlyph));
         OnPropertyChanged(nameof(MuteAction));
+    }
+
+    internal void ApplyMasterVolume(double value)
+    {
+        HoldVolumeEditOpen();
+        if (EqualityComparer<double>.Default.Equals(_volume, value)) return;
+        _volume = value;
+        OnPropertyChanged(nameof(Volume));
+        OnPropertyChanged(nameof(VolumeText));
     }
 
     public Task ToggleMuteAsync() => _owner.ToggleMuteAsync(this);
@@ -696,6 +815,26 @@ public sealed class ChannelViewModel : INotifyPropertyChanged, IDisposable
             debounce.Dispose();
         }
         if (failed) await _owner.RecoverFromWriteFailureAsync($"{Name} volume");
+    }
+
+    private void HoldVolumeEditOpen()
+    {
+        _volumeDebounce?.Cancel();
+        _volumeDebounce?.Dispose();
+        var edit = new CancellationTokenSource();
+        _volumeDebounce = edit;
+        _ = ReleaseMasterEditAsync(edit);
+    }
+
+    private async Task ReleaseMasterEditAsync(CancellationTokenSource edit)
+    {
+        try { await Task.Delay(160, edit.Token); }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            if (ReferenceEquals(_volumeDebounce, edit)) _volumeDebounce = null;
+            edit.Dispose();
+        }
     }
 
     private bool Set<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

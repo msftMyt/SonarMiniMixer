@@ -11,8 +11,8 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-dotnet@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: 10.0.x
       - name: Build
@@ -21,7 +21,14 @@ jobs:
         run: dotnet run --project SonarMiniMixer.Tests/SonarMiniMixer.Tests.csproj -c Release
       - name: Test app UI
         run: dotnet run --project SonarMiniMixer.App.Tests/SonarMiniMixer.App.Tests.csproj -c Release
-      - name: Publish app
-        run: dotnet publish SonarMiniMixer.App/SonarMiniMixer.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=None -p:DebugSymbols=false -p:ContinuousIntegrationBuild=true -p:Deterministic=true -o artifacts/publish
-      - name: Publish CLI
-        run: dotnet publish SonarMiniMixer.Cli/SonarMiniMixer.Cli.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=None -p:DebugSymbols=false -p:ContinuousIntegrationBuild=true -p:Deterministic=true -o artifacts/publish
+      - name: Build release bundle
+        shell: pwsh
+        run: .\tools\Build-Release.ps1
+      - name: Upload release bundle
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: SonarMiniMixer-win-x64
+          path: |
+            artifacts/SonarMiniMixer-win-x64.zip
+            artifacts/SonarMiniMixer-win-x64.zip.sha256
+          if-no-files-found: error

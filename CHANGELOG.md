@@ -4,6 +4,8 @@ All notable changes to Sonar Mini Mixer are documented here. This project follow
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-07-28
+
 ### Changed
 
 - **Push-first synchronization.** Sonar's local `/sock` WebSocket now drives volume, mute, ChatMix, routing, fallback-device, and reconnect updates; visible polling is only a safety net and hidden tray mode does not poll.
@@ -15,6 +17,7 @@ All notable changes to Sonar Mini Mixer are documented here. This project follow
 - Current GG compatibility: ChatMix is discovered at `/v1/chatMix` with legacy fallback and re-discovery after GG changes endpoint shape.
 - Sonar restart recovery now waits through GG's transient empty-address startup state, reconnects the event socket on the UI dispatcher, and immediately rebuilds routing/options.
 - External GG volume/mute changes apply directly from `SONAR_EVENT_VOLUME_DATA`; selected EQ presets refresh without re-downloading all preset catalogs, including newly created custom presets.
+- Master dragging now mirrors GG's proportional child-fader model and 80 ms native-write cadence; it never toggles mute or nudges a Core Audio endpoint.
 - Duplicate launches no longer deadlock WPF startup or hang on an unbounded named-pipe write; a shutdown/start race can take over the released mutex safely.
 - Exiting from the tray before ever opening the mixer no longer overwrites saved window size, pin, or position with defaults.
 - Dead Sonar routes (`isRunning=false`) display an explicit red warning instead of appearing healthy.
@@ -67,6 +70,7 @@ All notable changes to Sonar Mini Mixer are documented here. This project follow
 - Initial release: tray mixer for Sonar's six Classic channels, volume and mute control, ChatMix with center reset, pinned mode, automatic reconnection, optional Windows startup, and a read-only diagnostics CLI.
 
 [1.1.1]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.1.1
+[1.1.2]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.1.2
 [1.1.0]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.1.0
 [1.0.1]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.0.1
 [1.0.0]: https://github.com/msftMyt/SonarMiniMixer/releases/tag/v1.0.0
